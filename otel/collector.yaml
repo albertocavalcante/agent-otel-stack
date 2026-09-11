@@ -1,0 +1,137 @@
+# OpenTelemetry Collector config for Claude Code and GitHub Copilot.
+# Targets otelcol-contrib 0.160.0 (2026-09-02).
+#
+# WHY A COLLECTOR AT ALL, when Prometheus 3.x, Loki 3.x and Tempo all accept OTLP
+# natively and you could point the harnesses straight at them:
+#
+#   Claude Code emits `user.email` and `organization.id` on every metric and every
+#   event whenever you are authenticated, and there is NO environment variable
+#   that turns either off. The docs say "Always included when available". The
+#   collector is the only place those can be removed before they land in storage.
+#
+# That is the whole argument. Skip the collector and you are storing your team's
+# email addresses in a time-series database, permanently, by default.
+#
+# `attributes` and `redaction` are contrib-only processors — the core collector
+# image cannot do this.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # MUST be first in every pipeline. If it is not, the collector can OOM before
+  # the limiter ever sees the data it is meant to be limiting.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # 1. Direct identifiers with no client-side kill switch.
+  #
+  # user.email is deleted outright. organization.id and user.account_uuid are
+  # hashed rather than deleted so you can still group by org and by person
+  # without storing either — hashing keeps the dimension, loses the identity.
+  attributes/scrub:
+    actions:
+      - key: user.email
+        action: delete
+      - key: organization.id
+        action: hash
+      - key: user.account_uuid
+        action: hash
+      - key: user.account_id
+        action: hash
+      # Copilot's always-on attributes. These survive captureContent=false and
+      # have no setting of their own; the repository URL is a private-work leak
+      # in exactly the environments that most want telemetry.
+      - key: github.copilot.git.repository
+        action: delete
+      - key: github.copilot.git.branch
+        action: delete
+      - key: github.copilot.git.commit_sha
+        action: delete
+      # Claude Code sets this from CLAUDE_CODE_WORKSPACE_HOST_PATHS.
+      - key: workspace.host_paths
+        action: delete
+
+  # 2. Content, if any of the opt-in gates are on — and, on Copilot, even when
+  # they are not: tool arguments and results are reported to export
+  # unconditionally (microsoft/vscode#325720, open). Deny-list mode: keep the
+  # keys so the shape stays legible, scrub the values.
+  redaction/content:
+    allow_all_keys: true
+    blocked_key_patterns:
+      - ".*prompt$"
+      - ".*response$"
+      - "^body$"
+      - "^tool_input$"
+      - "^tool_parameters$"
+      - "gen_ai\\.input\\.messages"
+      - "gen_ai\\.output\\.messages"
+      - "gen_ai\\.system_instructions"
+      - "gen_ai\\.tool\\.call\\.arguments"
+      - "gen_ai\\.tool\\.call\\.result"
+    blocked_values:
+      - '[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}'
+      - 'sk[-]ant[-][A-Za-z0-9_\-]{20,}'
+      - 'gh[pousr]_[A-Za-z0-9]{20,}'
+    hash_function: sha3
+    summary: silent
+
+  # 3. Cardinality. session.id defaults ON and is a fresh UUID per session, so it
+  # mints a new time series per session per metric. Dropped from METRICS only —
+  # it stays on logs and traces, where high cardinality is cheap and where you
+  # actually need it to correlate a turn.
+  attributes/metrics_cardinality:
+    actions:
+      - key: session.id
+        action: delete
+      - key: ccr.session.id
+        action: delete
+
+  # MUST be last. Unlike the others it is order-sensitive relative to export.
+  batch:
+    send_batch_size: 1024
+    timeout: 5s
+
+exporters:
+  # The otlphttp exporter appends the signal path, so `/api/v1/otlp` becomes
+  # `/api/v1/otlp/v1/metrics`. Set the BASE endpoint, never the full path.
+  otlphttp/prometheus:
+    endpoint: http://prometheus:9090/api/v1/otlp
+    tls:
+      insecure: true
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: /ready
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub, redaction/content, attributes/metrics_cardinality, batch]
+      exporters: [otlphttp/prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub, redaction/content, batch]
+      exporters: [otlphttp/loki]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub, redaction/content, batch]
+      exporters: [otlp/tempo]
