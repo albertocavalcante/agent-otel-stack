@@ -12,18 +12,22 @@ Verified **2026-09-12**. Config lives in
 ## It is five surfaces over two engines
 
 Not three parallel implementations — two instrumentation engines behind five
-entry points, with **two different config namespaces inside VS Code alone**.
+entry points. The engine matters more than the branding: anything running the CLI
+runtime inherits the CLI's behaviour, including its refusal to export over
+`http://`.
 
 | Surface | Engine | Configured by |
 |---|---|---|
 | VS Code Copilot Chat | own instrumentation | `github.copilot.chat.otel.*` |
-| VS Code **Agent Host** | CLI runtime in a utility process | **`chat.agentHost.otel.*`** |
+| VS Code **agent host** | CLI runtime in a utility process | unconfirmed — see [04-surfaces.md](04-surfaces.md) |
 | Copilot CLI | CLI runtime | `COPILOT_OTEL_*` env |
 | Copilot SDK | wraps the CLI runtime | `TelemetryConfig` → env |
 | Copilot desktop | CLI runtime, embedded | env only |
 
-Configuring only `github.copilot.chat.otel.*` leaves every agent-host turn
-unexported. That is the most likely setup failure on this surface.
+Managed telemetry is documented as applying to *"both the Copilot Chat extension
+and the agent host process"*. Whether the agent host needs its own settings
+namespace is unconfirmed; what is certain is that it runs the CLI runtime, so the
+CLI's `http://` refusal applies to it.
 
 ## The `http://` trap
 
@@ -55,8 +59,8 @@ setting** — auth headers come from `OTEL_EXPORTER_OTLP_HEADERS` in the
 environment VS Code was launched from. Precedence: policy → env → user setting →
 default.
 
-`otlp-grpc` applies to the extension only; the CLI runtime behind the Agent Host
-still uses HTTP.
+`otlp-grpc` applies to the extension only. The CLI runtime uses HTTP regardless,
+so selecting grpc does not change what the agent host does.
 
 ## Enterprise-managed export
 

@@ -26,9 +26,13 @@ DS_FILE="dashboards/provisioning/datasources.yaml"
 # Recursive: Grafana's file provider walks subdirectories, and the standard
 # folder-per-product layout puts dashboards in them. A non-recursive glob
 # silently skipped every one.
+# Sorted: `find` returns filesystem order, so without this the error output
+# would reorder between machines and between runs after a rename. A gate whose
+# output is not byte-stable cannot be diffed.
 dashboards=()
 while IFS= read -r -d '' f; do dashboards+=("$f"); done < <(
-  find "$DASH_DIR" -name '*.json' -not -path '*/provisioning/*' -print0 2>/dev/null
+  find "$DASH_DIR" -name '*.json' -not -path '*/provisioning/*' -print0 2>/dev/null |
+    LC_ALL=C sort -z
 )
 if [ "${#dashboards[@]}" -eq 0 ]; then
   # Deliberately a pass, not a skip-with-a-wink: v1 ships no dashboards. But say

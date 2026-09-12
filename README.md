@@ -20,6 +20,20 @@ goes to a temp dir, which is deleted.
 Claims below are pinned to Claude Code **v2.1.220** and verified **2026-09-12**;
 `just smoke` re-verifies them on whatever you are running.
 
+## Three producers, two of them called Copilot
+
+| | Claude Code | Copilot — VS Code | Copilot — CLI |
+|---|---|---|---|
+| Metric namespace | `claude_code.*` | `copilot_chat.*` | `github.copilot.*` |
+| Cost metric | ✅ | ❌ | ❌ |
+| Billing attrs on spans | n/a | ❌ none | ✅ `nano_aiu` |
+| Exports to `http://` | ✅ | ✅ | ❌ **silently refuses** |
+| Cache-hit rate from | **metrics** | **traces only** | **traces only** |
+
+VS Code also runs an **agent host process** alongside the chat extension; managed
+telemetry is documented as applying to both. Whether it needs its own settings
+namespace is **unconfirmed** — see [docs/04-surfaces.md](docs/04-surfaces.md).
+
 ## The seven traps
 
 | # | Symptom | Cause | Fix |
@@ -124,6 +138,7 @@ first. `just smoke` prints your version.
 | [`docs/01-claude-code.md`](docs/01-claude-code.md) | Enablement, the eight metrics, events, beta traces |
 | [`docs/02-copilot.md`](docs/02-copilot.md) | Five surfaces, two engines, span hierarchy |
 | [`docs/03-privacy.md`](docs/03-privacy.md) | What leaves the machine, and what cannot be turned off |
+| [`docs/04-surfaces.md`](docs/04-surfaces.md) | Claude Code vs Copilot-VS Code vs Copilot-CLI, side by side |
 | [`otel/collector.yaml`](otel/collector.yaml) | Redaction-first collector, `otelcol-contrib` 0.160.0 |
 | [`otel/env/`](otel/env/) | Per-surface enablement — the lines you actually set |
 | `tools/smoke.sh` | `just smoke` — verifies the surface on your build |
