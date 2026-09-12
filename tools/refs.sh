@@ -10,9 +10,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$(repo_root)"
 
 failed=0
-for f in $(md_files); do
-  used=$({ grep -oE '\]\[[A-Za-z0-9_-]+\]' "$f" || true; } | sed -E 's/^\]\[(.*)\]$/\1/' | sort -u)
-  defined=$({ grep -oE '^\[[A-Za-z0-9_-]+\]:' "$f" || true; } | sed -E 's/^\[(.*)\]:$/\1/' | sort -u)
+# Read NUL-safe rather than `for f in $(md_files)`: an unquoted command
+# substitution word-splits on spaces, and the `|| true` below would then turn
+# "grep could not read that file" into "this file has no references".
+while IFS= read -r f; do
+  used=$({ grep -oE '\]\[[A-Za-z0-9_-]+\]' "$f" || true; } |
+    sed -E 's/^\]\[(.*)\]$/\1/' | tr '[:upper:]' '[:lower:]' | LC_ALL=C sort -u)
+  defined=$({ grep -oE '^\[[A-Za-z0-9_-]+\]:' "$f" || true; } |
+    sed -E 's/^\[(.*)\]:$/\1/' | tr '[:upper:]' '[:lower:]' | LC_ALL=C sort -u)
   for id in $used; do
     if ! printf '%s\n' "$defined" | grep -qx "$id"; then
       echo "✗ refs: $f uses [$id] but never defines it" >&2
@@ -25,6 +30,6 @@ for f in $(md_files); do
       failed=1
     fi
   done
-done
+done < <(md_files)
 [ "$failed" -eq 0 ] || exit 1
 ok refs "every reference-style link resolves"

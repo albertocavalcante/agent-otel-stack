@@ -17,7 +17,7 @@ PROMPT="${1:-reply with exactly: ok}"
 OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agent-otel-smoke.XXXXXX")"
 trap 'rm -rf "$OUT_DIR"' EXIT
 
-VERSION="$(claude --version 2>/dev/null | head -n1)"
+VERSION="$(claude --version 2>/dev/null | head -n1 || true)"
 echo
 echo "claude version: ${VERSION:-unknown}"
 echo "prompt:         $PROMPT"
@@ -33,7 +33,11 @@ CLAUDE_CODE_ENABLE_TELEMETRY=1 \
   OTEL_METRIC_EXPORT_INTERVAL=1000 \
   OTEL_LOGS_EXPORT_INTERVAL=1000 \
   claude -p "$PROMPT" >"$OUT_DIR/p1.out" 2>"$OUT_DIR/p1.err" || true
-cat "$OUT_DIR/p1.out" "$OUT_DIR/p1.err" >"$OUT_DIR/p1.all"
+cat "$OUT_DIR/p1.out" "$OUT_DIR/p1.err" >"$OUT_DIR/p1.raw"
+# The model's reply lands in this blob too, so a prompt that merely NAMES a
+# metric would satisfy every assertion below with no telemetry at all. Drop any
+# line echoing the prompt before asserting on it.
+grep -vF -- "$PROMPT" "$OUT_DIR/p1.raw" >"$OUT_DIR/p1.all" || true
 
 METRICS=(
   claude_code.session.count
@@ -78,9 +82,12 @@ echo "── pass 2: traces (beta) ───────────────
 CLAUDE_CODE_ENABLE_TELEMETRY=1 \
   CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1 \
   OTEL_TRACES_EXPORTER=console \
+  OTEL_METRICS_EXPORTER=none \
+  OTEL_LOGS_EXPORTER=none \
   OTEL_TRACES_EXPORT_INTERVAL=1000 \
   claude -p "$PROMPT" >"$OUT_DIR/p2.out" 2>"$OUT_DIR/p2.err" || true
-cat "$OUT_DIR/p2.out" "$OUT_DIR/p2.err" >"$OUT_DIR/p2.all"
+cat "$OUT_DIR/p2.out" "$OUT_DIR/p2.err" >"$OUT_DIR/p2.raw"
+grep -vF -- "$PROMPT" "$OUT_DIR/p2.raw" >"$OUT_DIR/p2.all" || true
 
 LIVE_SPANS=(claude_code.interaction claude_code.llm_request claude_code.tool claude_code.hook)
 live_seen=0
@@ -109,6 +116,12 @@ fi
 # feature release is a repo nobody runs twice.
 echo
 echo "── pass 3: dead-code spans must NOT appear ───────────────────────────"
+if [ "$live_seen" -eq 0 ]; then
+  warn smoke "pass 3 skipped — pass 2 produced no span output, so absence proves nothing"
+  echo
+  ok smoke "metrics verified on ${VERSION:-unknown}; traces inconclusive"
+  exit 0
+fi
 DEAD_SPANS=(
   claude_code.subagent.spawn
   claude_code.bash.subprocess

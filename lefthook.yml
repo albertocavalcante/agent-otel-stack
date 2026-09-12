@@ -1,13 +1,37 @@
+# Run `lefthook install` once per clone. Without it this file does nothing and
+# `git commit` runs no checks — silently. Check .git/hooks/ if unsure.
+
 pre-commit:
-  parallel: true
+  # git merge/rebase generate commits mid-operation; a full repo gate there
+  # blocks the operation rather than protecting anything.
+  skip:
+    - merge
+    - rebase
   commands:
     check:
       run: just check
-      fail_text: "Repository checks failed. Run `just check` to see which of leaks/links/sources/measurements broke."
+      fail_text: "`just check` failed. Run it to see which gate broke."
 
 commit-msg:
+  skip:
+    - merge
+    - rebase
   commands:
     conventional:
+      # Two assertions, not one regex. The previous `.{1,72}$` bounded only the
+      # description, so an 85-character subject passed while the failure text
+      # claimed a 72-character limit.
+      #
+      # Merge/Revert/fixup!/squash! are git's own wording — rejecting them makes
+      # `git revert` and `git commit --fixup` unusable.
       run: |
-        head -1 {1} | grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9./-]+\))?!?: .{1,72}$'
-      fail_text: "Commit subject must be Conventional Commits: `type(scope): description`, scope optional, subject <= 72 chars. Types: feat fix docs style refactor perf test build ci chore revert."
+        subject="$(head -1 {1})"
+        case "$subject" in
+          Merge*|Revert*|fixup!*|squash!*) exit 0 ;;
+        esac
+        printf '%s' "$subject" |
+          grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9./-]+\))?!?: .+$' ||
+          { echo "not Conventional Commits: $subject" >&2; exit 1; }
+        [ "${#subject}" -le 72 ] ||
+          { echo "subject is ${#subject} chars, limit is 72" >&2; exit 1; }
+      fail_text: "Commit subject must be `type(scope): description`, <= 72 chars. Types: feat fix docs style refactor perf test build ci chore revert."

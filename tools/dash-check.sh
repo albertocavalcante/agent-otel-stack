@@ -18,14 +18,23 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$(repo_root)"
 
 require_cmd jq
+require_cmd yq
 
 DASH_DIR="dashboards"
 DS_FILE="dashboards/provisioning/datasources.yaml"
 
-shopt -s nullglob
-dashboards=("$DASH_DIR"/*.json)
+# Recursive: Grafana's file provider walks subdirectories, and the standard
+# folder-per-product layout puts dashboards in them. A non-recursive glob
+# silently skipped every one.
+dashboards=()
+while IFS= read -r -d '' f; do dashboards+=("$f"); done < <(
+  find "$DASH_DIR" -name '*.json' -not -path '*/provisioning/*' -print0 2>/dev/null
+)
 if [ "${#dashboards[@]}" -eq 0 ]; then
-  ok dash-check "no dashboards yet"
+  # Deliberately a pass, not a skip-with-a-wink: v1 ships no dashboards. But say
+  # so plainly, because until one exists every check below is untested at
+  # runtime and this line is the only one that has ever executed.
+  ok dash-check "no dashboards to check (nothing under $DASH_DIR/)"
   exit 0
 fi
 
@@ -34,10 +43,11 @@ if [ ! -f "$DS_FILE" ]; then
   exit 1
 fi
 
-# Provisioned UIDs. Parsed with grep rather than a YAML library so this gate has
-# no dependency beyond jq; the file is ours and its shape is fixed.
-mapfile -t provisioned < <(grep -oE '^[[:space:]]*uid:[[:space:]]*[A-Za-z0-9_-]+' "$DS_FILE" |
-  sed -E 's/^[[:space:]]*uid:[[:space:]]*//')
+# Harvested with yq, not grep. A character-class grep truncates `uid: prom.1`
+# to `prom` — so a dashboard referencing `prom` passes here and then fails in
+# Grafana, which is precisely the failure this gate exists to prevent. It also
+# matched any `uid:` at any depth, including one nested under jsonData.
+mapfile -t provisioned < <(yq -r '.datasources[] | select(has("uid")) | .uid' "$DS_FILE")
 
 if [ "${#provisioned[@]}" -eq 0 ]; then
   fail dash-check "$DS_FILE pins no uid: — Grafana will mint random UIDs and nothing will bind"

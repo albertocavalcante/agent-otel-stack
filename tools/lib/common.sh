@@ -6,6 +6,16 @@
 #   source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 #
 # Every caller is expected to already be running under `set -euo pipefail`.
+#
+# bash 4+ is required: these gates use `mapfile`, and macOS ships 3.2.57 at
+# /bin/bash. Homebrew's bash is found via `env bash`, but a trimmed PATH or a
+# minimal CI image is not, and the failure is a bare `mapfile: command not
+# found` rather than anything diagnosable.
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+  printf '✗ %s: bash 4+ required, found %s (macOS ships 3.2 at /bin/bash)\n' \
+    "${0##*/}" "${BASH_VERSION:-unknown}" >&2
+  exit 1
+fi
 
 # Resolved from BASH_SOURCE[0] of *this* file, so repo_root() is independent of
 # the caller's cwd.

@@ -43,7 +43,7 @@ fmt-check:
 # Verify Claude Code's telemetry surface on THIS machine — console exporter,
 # no collector and no container. Makes two billed calls.
 smoke prompt='reply with exactly: ok':
-    @./tools/smoke.sh '{{ prompt }}'
+    @./tools/smoke.sh {{ quote(prompt) }}
 
 # Word count and link count per document
 stats:
