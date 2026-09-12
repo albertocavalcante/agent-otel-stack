@@ -1,0 +1,42 @@
+# Grafana datasource provisioning.
+#
+# `uid:` is pinned on every entry and that is not cosmetic. Omit it and Grafana
+# mints a random UID on first provision, persists it, and no committed dashboard
+# can ever reference it — and a wiped volume changes it again.
+#
+# Grafana v12+ enforces the format (failWrongDSUID, on by default): alphanumeric
+# plus dash, max 40 characters. `just dash-check` enforces the same rule here,
+# and that every uid a dashboard references is one of these.
+#
+# Service names match otel/collector.yaml's exporter endpoints.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: agent-otel-prom
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # The collector exports OTLP to Prometheus's native receiver; exemplars
+      # are what let you jump from a metric to the trace that produced it.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: agent-otel-tempo
+
+  - name: Loki
+    type: loki
+    uid: agent-otel-loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+
+  - name: Tempo
+    type: tempo
+    uid: agent-otel-tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false

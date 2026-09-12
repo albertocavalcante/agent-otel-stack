@@ -5,17 +5,10 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$(repo_root)"
 
-# Include set covers every text file class in the repo. The extensionless
-# `justfile` and the YAML configs were outside the gate in an earlier repo, which
-# is exactly where the first real leak was found.
+# The extensionless `justfile` and the YAML configs are easy to leave outside a
+# gate like this; `*.env` is where an OTLP auth header would actually get pasted.
 #
-# `*.env` matters more here than anywhere else: this repo's whole subject is
-# telemetry export, and the documented way to authenticate a collector is
-# OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>. An env file is the
-# first place someone will paste a real one.
-#
-# .git is excluded because grep -r does not read .gitignore and would otherwise
-# scan pack files; the rest are build caches that would drown the signal.
+# grep -r does not read .gitignore, so the excludes have to be explicit.
 if grep -rInE "$LEAK_PATTERN" \
   --exclude-dir='.venv' --exclude-dir='.git' \
   --exclude-dir='__pycache__' --exclude-dir='.pytest_cache' --exclude-dir='.ruff_cache' \

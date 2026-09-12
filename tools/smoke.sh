@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# tools/smoke.sh — prove Claude Code's telemetry surface on THIS machine, with no
-# collector, no container and no disk. Run by `just smoke`.
+# tools/smoke.sh — verify Claude Code's telemetry surface on this machine
+# without a collector or a container. Run by `just smoke`.
 #
-# Every claim in docs/01-claude-code.md is checkable here in about thirty seconds
-# using the `console` exporter. That matters because three of the caveats in this
-# repo are version-bound, and because the trace finding is the one most likely to
-# be doubted: Claude Code DOES emit spans, gated only by an env var, with no org
-# allowlist and no server-side flag.
+# Verifies the README's claims against the build in front of you, using the
+# `console` exporter. Three of those claims are version-bound.
 #
 # Deliberately does NOT pass --bare. --bare forces credential resolution through
 # ANTHROPIC_API_KEY; a plain `claude -p` uses whatever auth you already have.
@@ -85,7 +82,7 @@ CLAUDE_CODE_ENABLE_TELEMETRY=1 \
   claude -p "$PROMPT" >"$OUT_DIR/p2.out" 2>"$OUT_DIR/p2.err" || true
 cat "$OUT_DIR/p2.out" "$OUT_DIR/p2.err" >"$OUT_DIR/p2.all"
 
-LIVE_SPANS=(claude_code.interaction claude_code.llm_request claude_code.tool)
+LIVE_SPANS=(claude_code.interaction claude_code.llm_request claude_code.tool claude_code.hook)
 live_seen=0
 for s in "${LIVE_SPANS[@]}"; do
   if grep -qF "$s" "$OUT_DIR/p2.all"; then
@@ -102,9 +99,14 @@ else
 fi
 
 # --- pass 3: the negative assertion -----------------------------------------
-# These four span names exist in the 2.1.220 bundle but every call site is gated
-# on a function that is a hard-coded false. If one ever shows up here, the claim
-# in docs/01 is wrong for your build and this gate is how you find out.
+# These four span names appear in the v2.1.220 bundle, but every call site is
+# gated on a function that is a hard-coded false there, so none should emit.
+# Method: string extraction from the shipped bundle. They are absent from the
+# documented span hierarchy in code.claude.com/docs/en/monitoring-usage.
+#
+# This WARNS rather than fails. If Anthropic enables them, that is a vendor
+# improvement, and a repo whose flagship command turns red on someone else's
+# feature release is a repo nobody runs twice.
 echo
 echo "── pass 3: dead-code spans must NOT appear ───────────────────────────"
 DEAD_SPANS=(
@@ -116,15 +118,15 @@ DEAD_SPANS=(
 leaked=0
 for s in "${DEAD_SPANS[@]}"; do
   if grep -qF "$s" "$OUT_DIR/p2.all"; then
-    fail smoke "$s WAS emitted — the dead-code reading is wrong on $VERSION, update docs/01"
+    warn smoke "$s emitted on $VERSION — dormant on 2.1.220, so this build enables it; the README needs updating"
     leaked=1
   else
     printf '  ✓ %s absent, as expected\n' "$s"
   fi
 done
-[ "$leaked" -eq 0 ] || exit 1
+if [ "$leaked" -ne 0 ]; then
+  echo "  → not a failure: newer builds may enable these."
+fi
 
 echo
 ok smoke "telemetry surface verified on ${VERSION:-unknown} — no collector required"
-echo
-echo "Nothing was written outside $OUT_DIR, which is now removed."

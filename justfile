@@ -1,7 +1,7 @@
 default: check
 
 # Run every repository check
-check: leaks links refs lint fmt-check otel-check dash-check
+check: leaks links refs paths lint fmt-check otel-check dash-check
     @echo "✓ all checks passed"
 
 # Fail if personal paths or credential-shaped strings would be committed
@@ -15,6 +15,10 @@ links:
 # Fail if a reference-style link is used but never defined
 refs:
     @./tools/refs.sh
+
+# Fail if a comment points at a repo file that does not exist
+paths:
+    @./tools/paths.sh
 
 # Structurally validate otel/collector.yaml without needing the collector binary
 otel-check:
@@ -37,7 +41,7 @@ fmt-check:
     @./tools/fmt.sh --check
 
 # Verify Claude Code's telemetry surface on THIS machine — console exporter,
-# no collector, no container, no disk. Costs one trivial prompt.
+# no collector and no container. Makes two billed calls.
 smoke prompt='reply with exactly: ok':
     @./tools/smoke.sh '{{ prompt }}'
 

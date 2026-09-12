@@ -1,148 +1,163 @@
 # agent-otel-stack
 
-OpenTelemetry for **Claude Code** and **GitHub Copilot** — enablement, a
-redaction-first collector config, and a smoke test that verifies the documented
-behaviour on *your* build without a collector, a container, or a byte of disk.
-
-**Verified 2026-09-11** against the Claude Code v2.1.220 binary, both vendors'
-docs, and the VS Code / Copilot CLI issue trackers. Every claim carries a source.
+OpenTelemetry for **Claude Code** and **GitHub Copilot**: enablement per surface, a
+redaction-first collector config, and checks that run without a collector.
 
 > [!CAUTION]
-> **A naive setup silently produces wrong or absent data in five ways.** None of
-> them error. Each is a section below, and each is why this repo exists rather
-> than a compose file.
+> **Seven ways a working-looking setup gives you wrong or missing data. None of
+> them error.**
 
-## Start here
+## Verify your build
 
 ```sh
-just smoke          # verify Claude Code's telemetry on this machine — no collector needed
-just check          # lint, links, leaks, collector config, dashboard bindings
+just smoke     # what Claude Code actually emits here — no collector, two prompts
 ```
 
-`just smoke` is the point of v1. It costs one trivial prompt, writes only to a
-temp dir it then deletes, and tells you what your build actually emits.
+It runs `claude -p` twice, so it makes two billed calls and writes a session
+transcript to `~/.claude/projects/` like any other run. Only the OTel output
+goes to a temp dir, which is deleted.
 
-## The five traps
+Claims below are pinned to Claude Code **v2.1.220** and verified **2026-09-12**;
+`just smoke` re-verifies them on whatever you are running.
 
-### 1. `OTEL_EXPORTER_OTLP_PROTOCOL` has no default, and omitting it throws
+## The seven traps
 
-Claude Code raises `Unknown protocol set in … env var: undefined` and exports
-nothing. **Anthropic's own [env-vars page][cc-env] still says `grpc (default)`** —
-that page is stale; [`monitoring-usage`][cc-mon] and the shipped binary agree
-there is no default. This is the most likely cause of "I enabled telemetry and
-nothing arrived."
+| # | Symptom | Cause | Fix |
+|---|---|---|---|
+| [1](#1-no-default-protocol) | Nothing arrives, no error | `OTEL_EXPORTER_OTLP_PROTOCOL` has no default and throws | Set it explicitly |
+| [2](#2-the-copilot-cli-refuses-http) | VS Code data arrives, CLI data never does | CLI silently drops `http://` endpoints | TLS, or the file exporter |
+| [3](#3-delta-versus-cumulative) | Dead for 60 s, then wrong counters | `delta` default, 60 s interval | `cumulative`, 10 s |
+| [4](#4-two-identifiers-you-cannot-turn-off) | Team emails in your TSDB, permanently | `user.email` has no kill switch | The collector |
+| [5](#5-response-logging-turns-itself-on) | Model output exported after an upgrade | `OTEL_LOG_ASSISTANT_RESPONSES` inherits the prompt flag | Set it to `0` |
+| [6](#6-nano_aiu-is-duplicated-onto-children) | Copilot cost roughly doubled | `nano_aiu` is stamped on parent *and* children | Root span only |
+| [7](#7-copilot-has-no-cost-metric) | No Copilot cost at all | Copilot emits none | Usage Metrics API |
 
-### 2. The Copilot CLI silently refuses `http://` endpoints
+### 1. No default protocol
 
-Including `http://localhost:4318`. Export is dropped *"rather than sent in
-cleartext; startup is not aborted"* — no warning, no non-zero exit
-([copilot-cli#4567][cli4567], open).
+Claude Code throws `Unknown protocol set in … env var: undefined` and exports
+nothing. [`monitoring-usage`][cc-mon] is explicit: *"Claude Code has no default
+protocol, so set this or the signal-specific protocol variable for each `otlp`
+exporter you enable."*
 
-**The VS Code extension exports to that same endpoint fine.** So one collector on
-`localhost:4318` receives VS Code data and *nothing* from the CLI, and you
-conclude the CLI has no telemetry. Use TLS or the file exporter; see
-[`otel/env/copilot-cli.env`](otel/env/copilot-cli.env).
+### 2. The Copilot CLI refuses `http://`
 
-### 3. Metrics default to `delta`; Prometheus needs `cumulative`
+Export is dropped *"rather than sent in cleartext; startup is not aborted"* — no
+warning, no non-zero exit ([copilot-cli#4567][cli4567], open as of 2026-09-12). **The VS Code
+extension exports to the same endpoint fine**, so one collector on
+`localhost:4318` collects half your data silently.
+Workarounds: [`otel/env/copilot-cli.env`](otel/env/copilot-cli.env).
 
-Combined with a **60 s** default export interval, a correct setup looks dead for
-a minute and then produces counters that are wrong rather than missing — the
-harder failure to notice.
+### 3. delta versus cumulative
 
-### 4. `user.email` and `organization.id` cannot be turned off
+Prometheus needs `cumulative`. At the 60 s default interval you get a minute of
+silence, then counters that are wrong rather than absent.
 
-No environment variable disables either. Anthropic's docs: *"Always included when
-available."* **The collector is the only control point**, which is the entire
-argument for running one — Prometheus, Loki and Tempo all accept OTLP directly,
-and going direct means storing your team's email addresses in a time-series
-database permanently, by default.
+### 4. Two identifiers you cannot turn off
 
-On the Copilot side, `github.copilot.git.repository` (your remote URL), `.branch`,
-`.commit_sha` and the org name are always on too, with no setting of their own.
+No environment variable disables `user.email` or `organization.id`. Anthropic:
+*"Always included when available."* Copilot's `github.copilot.git.repository`
+(your remote URL), `.branch`, `.commit_sha` and org name are always on too.
 
-### 5. `OTEL_LOG_ASSISTANT_RESPONSES` silently inherits `OTEL_LOG_USER_PROMPTS`
+**This is the argument for a collector.** Prometheus, Loki and Tempo all accept
+OTLP directly — going direct means storing your team's email addresses in a
+time-series database, permanently, by default.
 
-When unset it *follows* the prompt-logging flag. Anyone who had prompt logging on
-**began exporting model output on upgrade to 2.1.193 with no config change.**
-Always set it explicitly — [`otel/env/claude-code.env`](otel/env/claude-code.env)
-does.
+### 5. Response logging turns itself on
 
-## Two more, for anyone computing cost
+`OTEL_LOG_ASSISTANT_RESPONSES` *follows* `OTEL_LOG_USER_PROMPTS` when unset, so
+prompt logging began exporting model output on upgrade to 2.1.193 with no config
+change. [`otel/env/claude-code.env`](otel/env/claude-code.env) sets it explicitly.
 
-**`github.copilot.nano_aiu` is duplicated onto child spans.** GitHub's own
-reference: read it *"from the root `invoke_agent` span only … summing it across
-every span double-counts."* And `github.copilot.cost` is a **per-request model
-multiplier, not a currency value**.
+### 6. `nano_aiu` is duplicated onto children
 
-**Copilot emits no cost metric at all** ([copilot-cli#3778][cli3778], open), while
-Claude Code emits `claude_code.cost.usage`. Copilot cost must come from the Usage
-Metrics API instead. **This is why one dashboard cannot serve both harnesses.**
+`github.copilot.nano_aiu` is stamped on the root `invoke_agent` span **and on
+every child `chat` span**, so summing across spans double-counts. Read the root
+only.
 
-## The two harnesses do not emit the same shape
+**The unit is billionths of an AI unit — divide by 1e9.** A dashboard that
+plots it raw is wrong by a factor of a billion. And `github.copilot.cost` is a
+per-request **model multiplier, not a currency value**.
+
+> [!NOTE]
+> We have not located a GitHub-authored page stating the duplication rule in
+> those words. The behaviour is corroborated by
+> [copilot-cli#4224][cli4224] and by third-party integrations; treat the exact
+> wording as **unverified** until GitHub documents it.
+
+### 7. Copilot has no cost metric
+
+[copilot-cli#3778][cli3778] — a user-filed feature request, open as of 2026-09-12 — asks for parity with
+`claude_code.cost.usage`. Until then, Copilot cost comes from the Usage Metrics
+API, not from OTel.
+
+## What each harness emits
 
 | | Claude Code | GitHub Copilot |
 |---|---|---|
 | Metrics | 8, including cost and token type | `gen_ai.*` + vendor; **no cost** |
-| Cache tokens | on `claude_code.token.usage{type=cacheRead}` | **traces only** ([vscode#317837][vs317837], open) |
+| Cache tokens | `claude_code.token.usage{type=cacheRead}` | **traces only** ([vscode#317837][vs317837], open as of 2026-09-12) |
 | Traces | beta, env-gated, works today | GA, the primary signal |
 | Metric namespace | `claude_code.*` | `copilot_chat.*` (VS Code) · `github.copilot.*` (CLI) |
 
-Copilot's *metrics* omit cache fields entirely, so **cache-hit rate is only
-obtainable by parsing spans** — on either surface. Build trace-first.
+Cache-hit rate is span-only on both surfaces. Build trace-first. And one
+dashboard cannot serve both harnesses — the namespaces and the cost story differ.
 
-## Version caveats on Claude Code 2.1.220
+## If you are pinned below 2.1.268
 
-| Behaviour | Fixed in |
+Current release is **2.1.269**. All three of these are already fixed upstream —
+they apply only to older installs, and this repo's claims were verified on
+2.1.220. Sources: [`monitoring-usage`][cc-mon] and the [CHANGELOG][cc-log].
+
+| Behaviour on an older build | Fixed in |
 |---|---|
 | MCP attribution inflated — `mcp_server.name` set on every request after an MCP call | 2.1.222 |
 | `cost.usage` is **list price**; contracted rates need `modelPricing` | 2.1.243 |
 | Bounded `*_safe` span attributes absent — hand-allowlist span-metric dimensions | 2.1.268 |
 
-Anthropic's docs warn that dashboards "show a step down after you upgrade" past
-the first one. `just smoke` prints your version alongside the results for exactly
-this reason.
+Anthropic warns that dashboards *"show a step down after you upgrade"* past the
+first. `just smoke` prints your version.
 
-## Layout
+## What's in the repo
 
 | Path | What |
 |---|---|
 | [`otel/collector.yaml`](otel/collector.yaml) | Redaction-first collector, `otelcol-contrib` 0.160.0 |
-| [`otel/env/`](otel/env/) | Per-surface enablement, with the traps inline |
+| [`otel/env/`](otel/env/) | Per-surface enablement — the lines you actually set |
+| `tools/smoke.sh` | `just smoke` — verifies the surface on your build |
 | `tools/otel-check.sh` | Validates the collector config **without the collector binary** |
 | `tools/dash-check.sh` | Rejects dashboards that won't bind to a provisioned datasource |
-| `tools/smoke.sh` | The verification above |
+| `tools/lib/common.sh` | Shared helpers and the leak pattern |
+| `justfile` · `lefthook.yml` | `just check` runs every gate; lefthook runs it pre-commit |
 
 ## Status
 
-v1 ships **no running stack** — deliberately. The configs are complete and
-validated by `just check`; a compose stack, dashboards and a Helm values file
-come next.
+v1 ships configs and checks, no running stack. Compose, dashboards and a Helm
+values file come next.
 
-The reason is worth stating plainly: the research is the scarce part. Every trap
-above is reproducible from this repo today with no image pulled, and
-`grafana/lgtm-distributed` — the obvious Helm answer — is hard-deprecated, so
-shipping one would have been worse than shipping none.
+`grafana/lgtm-distributed` is hard-deprecated — do not reach for it.
 
 ## Prior art
 
 - [`ColeMurray/claude-code-otel`](https://github.com/ColeMurray/claude-code-otel)
-  (MIT, 495★) — the reference implementation, last pushed 2025-06-17, predating
-  the trace tier
+  (MIT) — the reference implementation, last pushed 2025-06-17, predating the
+  trace tier
 - [Grafana Cloud's Claude Code integration](https://grafana.com/docs/grafana-cloud/observe-and-act/monitor-infrastructure/integrations/integration-reference/integration-claude-code/) — official, first-party
 - [Microsoft Learn — monitoring AI coding agents](https://learn.microsoft.com/en-us/azure/managed-grafana/grafana-opentelemetry-app-insights) — the densest cross-agent doc
 - [AWS Coding Agent Insights](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/coding-agents-claude-code.html)
 
-> [!NOTE]
-> Dashboards published on grafana.com carry **no licence field**. This repo does
-> not vendor any of their JSON; anything here is written from scratch.
+Dashboards published on grafana.com carry **no licence field**. This repo does not
+vendor their JSON.
 
-Cost analysis of these same two harnesses:
+Cost analysis of the same two harnesses:
 [`harness-economics`](https://github.com/albertocavalcante/harness-economics).
+
+## Licence
 
 Apache-2.0.
 
 [cc-mon]: https://code.claude.com/docs/en/monitoring-usage
-[cc-env]: https://code.claude.com/docs/en/env-vars
 [cli4567]: https://github.com/github/copilot-cli/issues/4567
 [cli3778]: https://github.com/github/copilot-cli/issues/3778
 [vs317837]: https://github.com/microsoft/vscode/issues/317837
+[cli4224]: https://github.com/github/copilot-cli/issues/4224
+[cc-log]: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md

@@ -2,21 +2,17 @@
 # tools/dash-check.sh — reject dashboard JSON that will not bind to a provisioned
 # datasource. Run by `just dash-check`.
 #
-# This gate exists because of one specific, extremely common failure. When you
-# export a dashboard with "Export for sharing externally", or download one from
-# grafana.com, the JSON gains an `__inputs` block declaring DS_PROMETHEUS and
-# every panel becomes "datasource": "${DS_PROMETHEUS}". The *import UI* resolves
-# that by prompting you. The *file provisioner does not* — it performs no
-# substitution, so every panel renders:
+# Exporting "for sharing externally", or downloading from grafana.com, adds an
+# `__inputs` block and turns every panel into "datasource": "${DS_PROMETHEUS}".
+# The import UI resolves that by prompting. The file provisioner does not, so
+# every panel renders:
 #
 #     Datasource named ${DS_PROMETHEUS} was not found
 #
-# and the dashboard looks broken for a reason that is invisible in the diff.
-# Tracked upstream since 2018: grafana/grafana#10786.
+# — invisible in the diff. Upstream: grafana/grafana#10786.
 #
-# The second half of the trap is the datasource side: if `uid:` is not pinned in
-# provisioning, Grafana mints a random one on first provision and persists it, so
-# a committed dashboard can never reference it and a wiped volume changes it.
+# The other half: an unpinned `uid:` in provisioning means Grafana mints a random
+# one and persists it, so no committed dashboard can ever reference it.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$(repo_root)"

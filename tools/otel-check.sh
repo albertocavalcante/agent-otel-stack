@@ -2,15 +2,9 @@
 # tools/otel-check.sh — structurally validate the collector config without the
 # collector. Run by `just otel-check`.
 #
-# `otelcol validate` needs the binary, which needs an image, which this repo
-# deliberately does not require. Three classes of error are checkable from the
-# YAML alone, and they are the ones that actually bite:
-#
-#   1. A pipeline naming a component that is not defined. The collector fails at
-#      startup with a message most people read as "my endpoint is wrong".
-#   2. memory_limiter not first. Upstream is explicit that it must lead, or the
-#      collector can OOM before the limiter ever sees the data.
-#   3. batch not last. It is order-sensitive in a way the others are not.
+# `otelcol validate` needs the binary. These three are checkable from the YAML
+# alone: a pipeline naming an undefined component (whose startup error reads
+# like "my endpoint is wrong"), memory_limiter not first, batch not last.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 cd "$(repo_root)"
