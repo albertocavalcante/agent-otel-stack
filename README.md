@@ -121,6 +121,9 @@ first. `just smoke` prints your version.
 
 | Path | What |
 |---|---|
+| [`docs/01-claude-code.md`](docs/01-claude-code.md) | Enablement, the eight metrics, events, beta traces |
+| [`docs/02-copilot.md`](docs/02-copilot.md) | Five surfaces, two engines, span hierarchy |
+| [`docs/03-privacy.md`](docs/03-privacy.md) | What leaves the machine, and what cannot be turned off |
 | [`otel/collector.yaml`](otel/collector.yaml) | Redaction-first collector, `otelcol-contrib` 0.160.0 |
 | [`otel/env/`](otel/env/) | Per-surface enablement — the lines you actually set |
 | `tools/smoke.sh` | `just smoke` — verifies the surface on your build |

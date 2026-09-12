@@ -4,3 +4,4 @@ lefthook-local.yml
 .scratch/
 *.local.json
 *.local.env
+node_modules/

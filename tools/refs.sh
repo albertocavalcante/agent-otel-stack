@@ -14,9 +14,11 @@ failed=0
 # substitution word-splits on spaces, and the `|| true` below would then turn
 # "grep could not read that file" into "this file has no references".
 while IFS= read -r f; do
-  used=$({ grep -oE '\]\[[A-Za-z0-9_-]+\]' "$f" || true; } |
+  # Strip fenced code blocks first: `arr[0][1]` in a sample is not a reference.
+  body=$(awk '/^```/{f=!f; next} !f' "$f")
+  used=$({ printf '%s\n' "$body" | grep -oE '\]\[[A-Za-z0-9_-]+\]' || true; } |
     sed -E 's/^\]\[(.*)\]$/\1/' | tr '[:upper:]' '[:lower:]' | LC_ALL=C sort -u)
-  defined=$({ grep -oE '^\[[A-Za-z0-9_-]+\]:' "$f" || true; } |
+  defined=$({ printf '%s\n' "$body" | grep -oE '^\[[A-Za-z0-9_-]+\]:' || true; } |
     sed -E 's/^\[(.*)\]:$/\1/' | tr '[:upper:]' '[:lower:]' | LC_ALL=C sort -u)
   for id in $used; do
     if ! printf '%s\n' "$defined" | grep -qx "$id"; then
