@@ -139,6 +139,7 @@ first. `just smoke` prints your version.
 | [`docs/02-copilot.md`](docs/02-copilot.md) | Five surfaces, two engines, span hierarchy |
 | [`docs/03-privacy.md`](docs/03-privacy.md) | What leaves the machine, and what cannot be turned off |
 | [`docs/04-surfaces.md`](docs/04-surfaces.md) | Claude Code vs Copilot-VS Code vs Copilot-CLI, side by side |
+| [`docs/05-normalization.md`](docs/05-normalization.md) | Joining the three shapes — and what cannot be joined |
 | [`otel/collector.yaml`](otel/collector.yaml) | Redaction-first collector, `otelcol-contrib` 0.160.0 |
 | [`otel/env/`](otel/env/) | Per-surface enablement — the lines you actually set |
 | `tools/smoke.sh` | `just smoke` — verifies the surface on your build |
@@ -149,8 +150,8 @@ first. `just smoke` prints your version.
 
 ## Status
 
-v1 ships configs and checks, no running stack. Compose, dashboards and a Helm
-values file come next.
+v1 ships docs, configs and checks — no running stack. Compose, dashboards and a
+Helm values file come next.
 
 `grafana/lgtm-distributed` is hard-deprecated — do not reach for it.
 
