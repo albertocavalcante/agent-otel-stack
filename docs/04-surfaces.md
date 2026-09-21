@@ -11,7 +11,7 @@ telemetry producers**, and two of them are both called Copilot.
 | **Signals** | metrics, events, beta traces | traces + metrics | traces + metrics |
 | **Cost metric** | ✅ `claude_code.cost.usage` | ❌ | ❌ |
 | **Billing attrs on spans** | n/a | ❌ **none at all** | ✅ `nano_aiu`, `cost` |
-| **Exports to `http://`** | ✅ | ✅ | ❌ **silently refuses** |
+| **Exports to `http://`** | ✅ | ✅ | ❌ **refuses on v1.0.80+** — unreproduced |
 | **Exporter selection** | `OTEL_{METRICS,LOGS,TRACES}_EXPORTER` | `exporterType`: otlp-http, otlp-grpc, console, file | `COPILOT_OTEL_EXPORTER_TYPE`: otlp-http, file — **no grpc** |
 | **Default exporter** | unset — off | `otlp-http` | `otlp-http` |
 | **Wire protocol** | `OTEL_EXPORTER_OTLP_PROTOCOL` — **none, throws** | `http/json` by default; the `protocol` setting cannot select grpc | `http/json`; `http/protobuf` needs v1.0.61+ |
@@ -35,9 +35,11 @@ whether spans carry billing data at all.
 
 ### 2. Assuming one collector endpoint serves both
 
-`http://localhost:4318` works for VS Code and is **silently dropped** by the CLI
-([copilot-cli#4567][cli4567], open). You get extension data, no CLI data, and no
-error. See [02-copilot.md](02-copilot.md).
+`http://localhost:4318` works for VS Code and is reported to be **silently
+dropped** by the CLI ([copilot-cli#4567][cli4567], open, against v1.0.80). You
+get extension data, no CLI data, and no error — *if* your CLI is new enough. The
+claim is unreproduced and version-bounded; `just copilot-smoke` reads the
+runtime you have. See [02-copilot.md](02-copilot.md).
 
 ### 3. Writing one dashboard
 
@@ -71,9 +73,15 @@ the settings documentation, which still lists only the extension's keys.
 > occurrences sit beside policy-resolution code, which would be consistent with
 > either. Do not assume you can set them in settings.json.
 
-Either way, the agent host runs the **CLI runtime**, so the CLI's refusal to
-export over `http://` can bite you *inside VS Code*. If extension spans arrive
-and agent turns do not, that is the first thing to check.
+Either way, the agent host is documented as running the **CLI runtime**, which is
+why the CLI's reported `http://` refusal is worth checking *inside VS Code* when
+extension spans arrive and agent turns do not.
+
+> [!NOTE]
+> That is an inference resting on two unverified claims: that the agent host
+> runs the CLI runtime (asserted by the vendor, not observed here) and that the
+> CLI refuses `http://` at all (see [02-copilot.md](02-copilot.md)). It is the
+> right first thing to check, not a conclusion to design around.
 
 ## Where each one's cache data lives
 

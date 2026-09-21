@@ -31,7 +31,7 @@ Claims below are pinned to Claude Code **v2.1.220** and verified **2026-09-12**;
 | Metric namespace | `claude_code.*` | `copilot_chat.*` | `github.copilot.*` |
 | Cost metric | ✅ | ❌ | ❌ |
 | Billing attrs on spans | n/a | ❌ none | ✅ `nano_aiu` |
-| Exports to `http://` | ✅ | ✅ | ❌ **silently refuses** |
+| Exports to `http://` | ✅ | ✅ | ❌ **refuses on v1.0.80+** — unreproduced, trap 2 |
 | Cache-hit rate from | **metrics** | **traces only** | **traces only** |
 
 VS Code also runs an **agent host process** alongside the chat extension; managed
@@ -48,7 +48,7 @@ copilot-chat **0.60.0** / VS Code **1.132.0** and verified **2026-09-21**;
 | # | Symptom | Cause | Fix |
 |---|---|---|---|
 | [1](#1-no-default-protocol) | Nothing arrives, no error | `OTEL_EXPORTER_OTLP_PROTOCOL` has no default and throws | Set it explicitly |
-| [2](#2-the-copilot-cli-refuses-http) | VS Code data arrives, CLI data never does | CLI silently drops `http://` endpoints | TLS in front of the collector |
+| [2](#2-the-copilot-cli-refuses-http) | VS Code data arrives, CLI data never does | CLI silently drops `http://` endpoints — **v1.0.80+, unreproduced** | TLS, or check your CLI version first |
 | [3](#3-delta-versus-cumulative) | Dead for 60 s, then wrong counters | `delta` default, 60 s interval | `cumulative`, 10 s |
 | [4](#4-two-identifiers-you-cannot-turn-off) | Team emails in your TSDB, permanently | `user.email` has no kill switch | The collector |
 | [5](#5-response-logging-turns-itself-on) | Model output exported after an upgrade | `OTEL_LOG_ASSISTANT_RESPONSES` inherits the prompt flag | Set it to `0` |
@@ -69,10 +69,21 @@ exporter you enable."*
 ### 2. The Copilot CLI refuses `http://`
 
 Export is dropped *"rather than sent in cleartext; startup is not aborted"* — no
-warning, no non-zero exit ([copilot-cli#4567][cli4567], open as of 2026-09-12). **The VS Code
-extension exports to the same endpoint fine**, so one collector on
-`localhost:4318` collects half your data silently.
-Workarounds: [`otel/env/copilot-cli.env`](otel/env/copilot-cli.env).
+warning, no non-zero exit ([copilot-cli#4567][cli4567], open as of 2026-09-12,
+**reported against CLI v1.0.80**). **The VS Code extension exports to the same
+endpoint fine**, so one collector on `localhost:4318` collects half your data
+silently. Workarounds: [`otel/env/copilot-cli.env`](otel/env/copilot-cli.env).
+
+> [!WARNING]
+> **This is the one trap here that has never been reproduced.** It is
+> vendor-reported, not observed. On the CLI runtime installed on this machine —
+> v1.0.54, which predates the version the issue was filed against — the refusal
+> is absent and the runtime's **own `copilot help monitoring` text recommends an
+> `http://` endpoint as its first worked example**.
+>
+> `just copilot-smoke` reads whatever runtime you have and says which of those
+> you are looking at. Treat the trap as version-bounded: still the first thing
+> to check when CLI data is missing, not a fact about every build.
 
 ### 3. delta versus cumulative
 

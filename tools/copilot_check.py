@@ -178,11 +178,7 @@ def main() -> int:
     try:
         ext_dir = copilot.ext_dir()
     except copilot.OverrideMissing as missing:
-        report.die(
-            GATE,
-            f"COPILOT_EXT_DIR={missing.path} holds no {copilot.MANIFEST} — "
-            "refusing to fall back to another build",
-        )
+        report.die(GATE, str(missing))
 
     if ext_dir is None:
         report.warn(

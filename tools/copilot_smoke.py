@@ -48,6 +48,20 @@ PROXIMITY = 500
 # → _that → BatchSpanProcessor. That cycle is what JSON.stringify throws on.
 CYCLE_SYMBOLS = ("_spanProcessor", "_shutdownOnce", "BindOnceFuture", r"this\._that")
 
+# README trap 2 says the CLI silently refuses to export over http://, quoting
+# `copilot help monitoring`: dropped "rather than sent in cleartext; startup is
+# not aborted". If that behaviour is in a runtime, these words are in the file.
+REFUSAL_FINGERPRINT = ("cleartext", "not aborted")
+
+# The version copilot-cli#4567 was reported against. Anything older is outside
+# the claim, and saying so is the difference between "disproved" and "untested".
+REFUSAL_REPORTED_AGAINST = (1, 0, 80)
+
+# Positive control. The refusal lives in the OTel code path, so a file with no
+# OTel configuration in it is the wrong file and an absence there proves
+# nothing at all.
+CLI_OTEL_MARKER = "COPILOT_OTEL_ENABLED"
+
 REMEDIATION = """
   Do not use otel.outfile for traces. Use
   github.copilot.chat.otel.dbSpanExporter.enabled TOGETHER WITH
@@ -174,6 +188,8 @@ def inspect_bundle(ext_dir: Path) -> int:
         else:
             report.note(f"{label} ×0")
 
+    inspect_cli_runtime()
+
     print()
     if near:
         report.warn(GATE, "file exporter writes empty spans on this build — README trap 8")
@@ -185,6 +201,72 @@ def inspect_bundle(ext_dir: Path) -> int:
             "file exporter looks sound on this build — re-read README trap 8 before trusting it",
         )
     return 0
+
+
+def inspect_cli_runtime() -> None:
+    """Report what the installed CLI runtime does about README trap 2.
+
+    Reports only. The refusal is vendor behaviour, and a check that turns red
+    because someone else shipped a change is a check nobody runs twice.
+    """
+    banner("pass 3: the CLI runtime (README trap 2)")
+
+    try:
+        found = copilot.cli_runtime()
+    except copilot.OverrideMissing as missing:
+        report.die(GATE, str(missing))
+
+    if found is None:
+        report.note(f"no CLI runtime under {copilot.CLI_ROOT}")
+        report.warn(GATE, "no Copilot CLI installed — trap 2 untested on this machine")
+        return
+
+    path, version = found
+    print(f"  ✓ runtime: {version}")
+
+    source = (path / copilot.CLI_ENTRYPOINT).read_text(encoding="utf-8", errors="replace")
+
+    # Negative control FIRST. Without it, a future layout that moves the OTel
+    # code out of this file would read as "trap 2 disproved".
+    if CLI_OTEL_MARKER not in source:
+        report.note(f"{CLI_OTEL_MARKER} absent — this is not the OTel code path")
+        report.warn(
+            GATE,
+            "the CLI runtime holds no OTel configuration — an absent refusal here proves nothing",
+        )
+        return
+
+    print(f"  ✓ positive control: {CLI_OTEL_MARKER} present")
+
+    present = [word for word in REFUSAL_FINGERPRINT if word in source]
+    if present:
+        print(f"  ! refusal fingerprint: {', '.join(present)}")
+        report.warn(GATE, f"CLI {version} appears to refuse http:// — README trap 2 holds here")
+        return
+
+    for word in REFUSAL_FINGERPRINT:
+        report.note(f"'{word}' ×0")
+
+    # The vendor's own worked example is the strongest counter-evidence there
+    # is: it is the same help text trap 2 quotes against it.
+    recommends_http = "OTEL_EXPORTER_OTLP_ENDPOINT=http://" in source
+    if recommends_http:
+        print("  ! help text recommends an http:// endpoint")
+
+    older = copilot.version_key(version) < REFUSAL_REPORTED_AGAINST
+    reported = ".".join(str(n) for n in REFUSAL_REPORTED_AGAINST)
+    if older:
+        report.warn(
+            GATE,
+            f"trap 2 not reproducible on CLI {version}, which predates the "
+            f"{reported} it was reported against — untested, not disproved",
+        )
+    else:
+        report.warn(
+            GATE,
+            f"trap 2 not reproducible on CLI {version}, at or past the {reported} "
+            f"it was reported against — the claim needs re-sourcing",
+        )
 
 
 def main() -> int:
@@ -213,11 +295,7 @@ def main() -> int:
     try:
         ext_dir = copilot.ext_dir()
     except copilot.OverrideMissing as missing:
-        report.die(
-            GATE,
-            f"COPILOT_EXT_DIR={missing.path} holds no {copilot.MANIFEST} — "
-            "refusing to fall back to another build",
-        )
+        report.die(GATE, str(missing))
 
     if ext_dir is None:
         report.warn(GATE, "no VS Code Copilot build found — set COPILOT_EXT_DIR to inspect one")

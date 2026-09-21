@@ -24,8 +24,8 @@ Verified **2026-09-21** against the shipping build: **copilot-chat 0.60.0**, hos
 
 Not three parallel implementations — two instrumentation engines behind five
 entry points. The engine matters more than the branding: anything running the CLI
-runtime inherits the CLI's behaviour, including its refusal to export over
-`http://`.
+runtime inherits the CLI's behaviour, including its reported refusal to export
+over `http://` — a claim that is version-bounded and unreproduced, see below.
 
 | Surface | Engine | Configured by |
 |---|---|---|
@@ -38,17 +38,40 @@ runtime inherits the CLI's behaviour, including its refusal to export over
 Managed telemetry is documented as applying to *"both the Copilot Chat extension
 and the agent host process"* — which is only worth saying if they are separately
 configurable, and they are: `chat.agentHost.otel.*` is present in the shipped
-agent host. What is certain either way is that it runs the CLI runtime, so the
-CLI's `http://` refusal applies to it.
+agent host. It is also documented as running the CLI runtime, which would mean
+the CLI's `http://` refusal applies to it — but that is an inference from a
+premise we have not verified, resting on a claim we have not reproduced. Both
+halves are below.
 
 ## The `http://` trap
 
 > [!CAUTION]
-> **The Copilot CLI silently disables export to any `http://` endpoint**,
-> including `http://localhost:4318`. From `copilot help monitoring`: export is
-> dropped *"rather than sent in cleartext; startup is not aborted."* There is no
-> non-zero exit and the only signal is a process-log warning.
-> ([copilot-cli#4567][cli4567], open as of 2026-09-12, reported against v1.0.80.)
+> **The Copilot CLI is reported to silently disable export to any `http://`
+> endpoint**, including `http://localhost:4318`. From `copilot help monitoring`:
+> export is dropped *"rather than sent in cleartext; startup is not aborted."*
+> There is no non-zero exit and the only signal is a process-log warning.
+> ([copilot-cli#4567][cli4567], open as of 2026-09-12, **reported against
+> v1.0.80**.)
+
+> [!WARNING]
+> **Unreproduced, and version-bounded.** The CLI runtime installed on this
+> machine is **v1.0.54**, which predates v1.0.80. In it:
+>
+> - `cleartext` and `not aborted` appear **zero** times — in the CLI's own
+>   bundle, in the VS Code-bundled CLI copy, and in the agent host;
+> - its activation function performs no protocol check whatsoever;
+> - its own `copilot help monitoring` text gives the **opposite** advice, listing
+>   `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` as its first worked
+>   example;
+> - its changelog has no entry mentioning the behaviour.
+>
+> So either it landed between 1.0.54 and 1.0.80, or the claim needs re-sourcing.
+> `just copilot-smoke` reads whichever runtime you have and says which case you
+> are in — including refusing to conclude when it is looking at a file with no
+> OTel code in it.
+>
+> Keep checking this when CLI data goes missing. Do not treat it as a property of
+> every build, and do not build infrastructure on it without reproducing it.
 
 **The VS Code extension exports to that same endpoint without complaint.** So a
 collector on `localhost:4318` receives extension data and nothing from the CLI,
