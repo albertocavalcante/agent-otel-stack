@@ -1,13 +1,24 @@
 # GitHub Copilot
 
-Verified **2026-09-12**. Config lives in
+Verified **2026-09-21** against the shipping build: **copilot-chat 0.60.0**, host
+**VS Code 1.132.0**. Config lives in
 [`../otel/env/copilot-cli.env`](../otel/env/copilot-cli.env) and
 [`../otel/env/copilot-vscode.env`](../otel/env/copilot-vscode.env).
 
+> [!IMPORTANT]
+> **Copilot is a built-in extension of VS Code, not a marketplace install.** Its
+> full settings schema and its bundled exporter code sit inside the application
+> bundle, readable with no seat and no sign-in. That is how everything below was
+> verified, and it is what `just copilot-check` and `just copilot-smoke` read.
+
 > [!CAUTION]
-> **No Copilot seat was available while writing this.** Everything here is
-> derived from vendor documentation and issue trackers, not observed. The Claude
-> Code side has `just smoke`; this side has nothing equivalent.
+> **Static verification is not live traffic.** The settings schema, the exporter
+> implementation and the agent-host namespace are read from the shipped build and
+> are facts. Three claims are not, and none of them has been observed here: the
+> CLI's `http://` refusal (vendor-documented, see below), the ≥ 1.130
+> billable-span regression ([#328393][vs328393], a third-party report), and
+> content exported despite `captureContent: false` (see
+> [03-privacy.md](03-privacy.md)). Each needs a signed-in session to settle.
 
 ## It is five surfaces over two engines
 
@@ -19,14 +30,15 @@ runtime inherits the CLI's behaviour, including its refusal to export over
 | Surface | Engine | Configured by |
 |---|---|---|
 | VS Code Copilot Chat | own instrumentation | `github.copilot.chat.otel.*` |
-| VS Code **agent host** | CLI runtime in a utility process | unconfirmed — see [04-surfaces.md](04-surfaces.md) |
+| VS Code **agent host** | CLI runtime in a utility process | `chat.agentHost.otel.*` — see [04-surfaces.md](04-surfaces.md) |
 | Copilot CLI | CLI runtime | `COPILOT_OTEL_*` env |
 | Copilot SDK | wraps the CLI runtime | `TelemetryConfig` → env |
 | Copilot desktop | CLI runtime, embedded | env only |
 
 Managed telemetry is documented as applying to *"both the Copilot Chat extension
-and the agent host process"*. Whether the agent host needs its own settings
-namespace is unconfirmed; what is certain is that it runs the CLI runtime, so the
+and the agent host process"* — which is only worth saying if they are separately
+configurable, and they are: `chat.agentHost.otel.*` is present in the shipped
+agent host. What is certain either way is that it runs the CLI runtime, so the
 CLI's `http://` refusal applies to it.
 
 ## The `http://` trap
@@ -42,25 +54,152 @@ CLI's `http://` refusal applies to it.
 collector on `localhost:4318` receives extension data and nothing from the CLI,
 and the obvious conclusion — "the CLI has no telemetry" — is wrong.
 
-Use TLS in front of the collector, or the file exporter.
+Use TLS in front of the collector. **Not the file exporter** — read the next
+section first.
+
+## The file exporter writes `{}` for every span
+
+> [!CAUTION]
+> **The file exporter produces a file full of valid JSON containing no traces at
+> all.** Every span line is the literal two-byte string `{}`. Derived from the
+> shipped copilot-chat **0.60.0** bundle by reading the serialiser and the object
+> it is handed — structural, not observed in a live session.
+
+**The trigger is `outfile`, not `exporterType`.** The file branch requires both:
+
+```js
+if (e.exporterType === "file" && e.fileExporterPath) { …FileSpanExporter… }
+```
+
+`fileExporterPath` comes from `outfile`, and an empty string becomes `undefined`.
+So `exporterType: "file"` **on its own does not write a file** — every branch
+falls through and telemetry goes to the default OTLP endpoint,
+`http://localhost:4318`, where on most machines nothing is listening. Setting
+`outfile` is what selects the file exporter, and it does so whatever
+`exporterType` says.
+
+The exporter serialises with a hand-rolled `JSON.stringify` wrapped in
+`try { … } catch { return "{}" }`. The span object holds a live back-reference to
+its own `BatchSpanProcessor`, whose `_shutdownOnce` holds a `BindOnceFuture`
+whose `_that` points back at the processor. `JSON.stringify` throws
+`Converting circular structure to JSON`, the catch swallows it, and `{}` is
+written. No name, no trace ID, no attributes.
+
+Logs and metrics **do** serialise — but into the SDK's internal shape
+(`resource._rawAttributes` tuples, no `resourceLogs` envelope), which is not
+OTLP/JSON, so no collector receiver reads it either.
+
+All three signals share **one file** with no type discriminator, so telling them
+apart means sniffing shape.
+
+> [!WARNING]
+> **`{}` is valid JSON**, so a record-counting inspector reports a file of
+> nothing as tens of thousands of healthy records. Count the dead ones:
+>
+> ```sh
+> grep -c '^{}$' spans.jsonl
+> ```
+>
+> `just copilot-smoke` inspects the installed exporter, and
+> `just copilot-smoke <path>` reports the composition of a dump you already have.
+
+Two more properties of that exporter, independent of the serialisation bug:
+`forceFlush()` is a literal `return Promise.resolve()` — a no-op that touches
+neither the stream nor the disk — and there is **no rotation, no size cap and no
+truncation**, so the file grows without bound. Spans contribute three bytes
+each; the volume comes from logs and metrics.
+
+All three exporters open their **own** append stream on the same path, so three
+file descriptors write concurrently. `grep -c '^{}$'` is the honest count only
+while no write interleaves mid-line.
+
+> [!WARNING]
+> **The replacement needs two settings, not one.** `dbSpanExporter.enabled` is
+> the only span sink that runs in parallel with OTLP — but on its own it does
+> the opposite of what you want:
+>
+> ```js
+> t = e.dbSpanExporter && !e.enabledExplicitly && !e.fileExporterPath && e.exporterType !== "console"
+> ```
+>
+> When `t` holds, the primary span exporter becomes a **null exporter** that
+> drops every batch and reports `SUCCESS`, while logs and metrics are redirected
+> to the console. `enabledExplicitly` is only true when `enabled` is set to
+> `true` outright. So `dbSpanExporter.enabled` alone gives you SQLite and
+> nothing else — with a reassuring `[OTel] Instrumentation enabled` line in the
+> log and a successful export on every batch.
+>
+> Set **both**:
+>
+> ```jsonc
+> "github.copilot.chat.otel.enabled": true,
+> "github.copilot.chat.otel.dbSpanExporter.enabled": true
+> ```
+
+Do not repeat this check by grepping for `safeStringify`: that name is also
+Ajv's code generator, which accounts for both of its occurrences in the bundle.
+Anchor on the `catch` returning `{}` beside the write-stream construction.
 
 ## VS Code settings
 
-| Setting | Default | Values |
-|---|---|---|
-| `github.copilot.chat.otel.enabled` | `false` | bool |
-| `github.copilot.chat.otel.exporterType` | `otlp-http` | `otlp-http`, `otlp-grpc`, `console`, `file` |
-| `github.copilot.chat.otel.otlpEndpoint` | `http://localhost:4318` | URL |
-| `github.copilot.chat.otel.captureContent` | `false` | bool — **not reliably enforced**, see [03-privacy.md](03-privacy.md) |
-| `github.copilot.chat.otel.maxAttributeSizeChars` | `0` | int; `0` = no truncation |
+All eleven keys, prefix `github.copilot.chat.otel.`, every one tagged `advanced`.
 
-Landed in **VS Code 1.119** (2026-05-06). There is **no user-facing headers
-setting** — auth headers come from `OTEL_EXPORTER_OTLP_HEADERS` in the
-environment VS Code was launched from. Precedence: policy → env → user setting →
-default.
+| Setting | Type | Default | Values and notes |
+|---|---|---|---|
+| `enabled` | bool | `false` | Requires window reload — as do all ten below |
+| `exporterType` | string | `otlp-http` | `otlp-http`, `otlp-grpc`, `console`, `file` |
+| `protocol` | string | `""` | `""`, `http/json`, `http/protobuf`, `grpc`. **Empty means `http/json`** |
+| `otlpEndpoint` | string | `http://localhost:4318` | Base URL; the exporter appends the signal path |
+| `captureContent` | bool | `false` | **Not reliably enforced**, see [03-privacy.md](03-privacy.md) |
+| `headers` | object | `{}` | `{ "key": "value" }` onto the OTLP exporter. **Contains credentials** |
+| `serviceName` | string | `""` | `service.name` resource attribute |
+| `resourceAttributes` | object | `{}` | Extra resource attributes, merged per key with the env var |
+| `maxAttributeSizeChars` | int | `0` | `0` **disables** truncation — see below |
+| `outfile` | string | `""` | JSON-lines path. **Non-empty overrides `exporterType` to `file`** |
+| `dbSpanExporter.enabled` | bool | `false` | SQLite span store. **Enables OTel by itself** |
+
+Settings landed in **VS Code 1.119** (2026-05-06); `headers`, `protocol`,
+`serviceName`, `resourceAttributes` and `maxAttributeSizeChars` arrived later.
 
 `otlp-grpc` applies to the extension only. The CLI runtime uses HTTP regardless,
 so selecting grpc does not change what the agent host does.
+
+### Headers are a setting, not just an environment variable
+
+`headers` takes a `{ "key": "value" }` object applied **directly to the OTLP
+exporter**, not through the environment. It merges per key with
+`OTEL_EXPORTER_OTLP_HEADERS`, and the environment wins on a collision.
+
+This matters most on macOS, where a GUI-launched VS Code inherits launchd's
+minimal environment rather than your shell's — an exported
+`OTEL_EXPORTER_OTLP_HEADERS` is simply invisible unless you launch from a
+terminal. The setting is read either way.
+
+The cost is that settings.json is plaintext and often tracked in a dotfiles repo,
+and `just leaks` scans `*.env` but not settings.json. Scope the token to ingest
+only.
+
+Precedence: enterprise policy → environment variable → user setting → default.
+
+### Scope is `application` on all eleven
+
+Workspace and folder settings **cannot** set them, which is the structural fix
+for the pre-1.123.1 defect where a cloned repo could flip `enabled`,
+`captureContent` or `otlpEndpoint` on you.
+
+Five are described as "user settings only", meaning they take no *environment*
+override of their own — but read that phrase carefully. `serviceName`,
+`resourceAttributes` and `headers` still resolve an enterprise **policy** value,
+and policy wins. Only `maxAttributeSizeChars` and `dbSpanExporter.enabled` have
+no policy path at all.
+
+### `maxAttributeSizeChars: 0` is not the safe value it looks like
+
+`0` **disables** truncation, so a backend with a per-attribute size cap receives
+the full JSON payload and may reject it. Set a positive value matching your
+backend's limit. Truncated values are suffixed
+`...[truncated, original N chars]`, so truncation is visible in the data rather
+than silent.
 
 ## Enterprise-managed export
 
@@ -125,14 +264,16 @@ into the root either — roughly **10–15% of session cost invisible**.
 |---|---|
 | CLI < v1.0.64 | Cache and reasoning attributes used wrong underscore-separated names |
 | CLI < v1.0.61 | JSON-only OTLP; `OTEL_EXPORTER_OTLP_PROTOCOL` silently ignored |
-| VS Code < 1.123.1 | **Security**: workspace settings could flip `otel.enabled`/`captureContent`/`otlpEndpoint` |
+| VS Code < 1.123.1 | **Security**: workspace settings could flip `otel.enabled`/`captureContent`/`otlpEndpoint`. Fixed structurally — all eleven keys are `scope: application` in 0.60.0, so workspace settings cannot reach them |
 | VS Code ≥ 1.130 | Session-ID attrs dropped; `chat` spans for billable models reportedly stopped ([#328393][vs328393], open) |
 
 > [!WARNING]
-> The last row matters before you trust any VS Code dataset. **Check that
-> `gen_ai.request.model` matches the model you actually selected** — if recent
-> builds emit spans only for utility models, your data contains no billable
-> calls.
+> **The last row applies to this build.** 1.132.0 is ≥ 1.130, so this is a live
+> hazard, not a historical one. Before you trust any VS Code dataset, **check
+> that `gen_ai.request.model` matches the model you actually selected** — if
+> recent builds emit spans only for utility models, your data contains no
+> billable calls. This is one of the three claims that static verification
+> cannot settle; it needs one signed-in request.
 
 [cli4567]: https://github.com/github/copilot-cli/issues/4567
 [cli3778]: https://github.com/github/copilot-cli/issues/3778

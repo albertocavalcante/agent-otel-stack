@@ -1,0 +1,21 @@
+# Lint and format settings for the Python gates in tools/.
+#
+# `just lint` runs `ruff check`, `just fmt` runs `ruff format` — the same two
+# commands that cover the shell half via shellcheck and shfmt.
+
+line-length = 100
+target-version = "py311"
+
+[lint]
+# E,F are the defaults. I keeps imports ordered, B catches the bug-prone
+# patterns, SIM caught the two leaked file handles that started this, and UP
+# stops the code drifting back to older Python idioms.
+select = ["E", "F", "I", "B", "SIM", "UP"]
+
+[lint.per-file-ignores]
+# The gates are executed, never imported, so they insert tools/lib on sys.path
+# before importing from it. That is necessarily a statement before an import.
+"tools/*.py" = ["E402"]
+
+[format]
+docstring-code-format = true

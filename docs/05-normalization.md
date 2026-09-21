@@ -101,8 +101,10 @@ Three separate problems stack up:
 
 1. **Different units.** USD against AI units. There is no published conversion,
    and `github.copilot.cost` is a per-request *model multiplier*, not currency.
-2. **One surface has nothing.** VS Code chat spans carry no billing attributes —
-   verified by absence in the monitoring documentation.
+2. **One surface has nothing.** VS Code chat spans carry no billing attributes.
+   This one is verified by *absence* — in the monitoring documentation, and in
+   the shipped extension's attribute definitions. Absence is weaker evidence than
+   presence; treat it as strong but not conclusive.
 3. **Claude Code's figure is list price** unless an organisation has configured
    the `modelPricing` managed setting (2.1.243+), so it is not what a contracted
    customer actually pays either.

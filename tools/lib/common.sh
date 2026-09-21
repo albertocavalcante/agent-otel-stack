@@ -77,3 +77,15 @@ md_files() {
 sh_files() {
   git ls-files --cached --others --exclude-standard '*.sh'
 }
+
+# py_files — every Python file the repo will ship, one per line.
+#
+# Same untracked-inclusive rule again, and it matters most here: the Python
+# gates arrived as new files, and a plain `git ls-files` would have left every
+# one of them unlinted until the moment it was staged.
+py_files() {
+  git ls-files --cached --others --exclude-standard '*.py'
+}
+
+# Locating the bundled Copilot extension lives in tools/lib/copilot.py. Both
+# gates that need it are Python, so there is no shell twin to keep in step.

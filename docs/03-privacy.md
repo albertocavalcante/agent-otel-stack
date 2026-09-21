@@ -101,6 +101,10 @@ Assume Copilot prompt content may leave the machine whatever the setting says.
   scrub were mis-configured. Then configure the scrub anyway.
 - `OTEL_EXPORTER_OTLP_HEADERS` is where a real token gets pasted. `just leaks`
   scans `*.env` for exactly that reason.
+- On Copilot in VS Code that token can now live in **settings.json** instead,
+  under `github.copilot.chat.otel.headers`. That file is plaintext, frequently
+  tracked in a dotfiles repo, and **outside every gate in this repo**. Scope the
+  token to ingest only.
 - On a shared or enterprise machine, managed settings override everything you set
   — including the endpoint. Your telemetry may already have a destination.
 

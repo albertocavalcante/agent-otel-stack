@@ -1,7 +1,7 @@
 default: check
 
 # Run every repository check
-check: leaks links refs paths lint fmt-check otel-check dash-check
+check: leaks links refs paths lint fmt-check otel-check dash-check copilot-check
     @echo "✓ all checks passed"
 
 # Fail if personal paths or credential-shaped strings would be committed
@@ -18,15 +18,19 @@ refs:
 
 # Fail if a comment points at a repo file that does not exist
 paths:
-    @./tools/paths.sh
+    @./tools/paths.py
 
 # Structurally validate otel/collector.yaml without needing the collector binary
 otel-check:
-    @./tools/otel-check.sh
+    @./tools/otel_check.py
 
 # Fail on dashboard JSON that will not bind to a provisioned datasource
 dash-check:
     @./tools/dash-check.sh
+
+# Fail if a documented Copilot setting has drifted from the installed VS Code
+copilot-check:
+    @./tools/copilot_check.py
 
 # Static-analyse every shell script
 lint:
@@ -44,6 +48,11 @@ fmt-check:
 # no collector and no container. Makes two billed calls.
 smoke prompt='reply with exactly: ok':
     @./tools/smoke.sh {{ quote(prompt) }}
+
+# Verify Copilot's telemetry surface on THIS machine — no seat, no API calls.
+# Pass a dump the file exporter produced to report what it actually contains.
+copilot-smoke dump='':
+    @./tools/copilot_smoke.py {{ quote(dump) }}
 
 # Word count and link count per document
 stats:

@@ -51,17 +51,22 @@ The Copilot Chat extension is not the only telemetry producer inside VS Code.
 There is also an **agent host process**, and the enterprise documentation is
 explicit that managed telemetry *"applies to both the Copilot Chat extension and
 the agent host process"* — which is only worth saying if they are separately
-configurable.
+configurable. They are.
 
-> [!WARNING]
-> **Unconfirmed:** a separate `chat.agentHost.otel.*` settings namespace is
-> reported in a GitHub issue, but the VS Code settings documentation lists only
-> the eight `github.copilot.chat.otel.*` keys and no agent-host equivalent. We
-> have not verified it and do not assert it.
->
-> What follows regardless: the agent host runs the **CLI runtime**, so the CLI's
-> refusal to export over `http://` can bite you *inside VS Code*. If extension
-> spans arrive and agent turns do not, that is the first thing to check.
+A separate `chat.agentHost.otel.*` namespace is **confirmed present** in the
+shipped agent host of VS Code 1.132.0, alongside the eleven
+`github.copilot.chat.otel.*` keys documented in
+[02-copilot.md](02-copilot.md). Verified 2026-09-21 by reading the build, not
+the settings documentation, which still lists only the extension's keys.
+
+> [!NOTE]
+> **Still unverified: whether those are user settings or policy-only keys.** The
+> occurrences sit beside policy-resolution code, which would be consistent with
+> either. Do not assume you can set them in settings.json.
+
+Either way, the agent host runs the **CLI runtime**, so the CLI's refusal to
+export over `http://` can bite you *inside VS Code*. If extension spans arrive
+and agent turns do not, that is the first thing to check.
 
 ## Where each one's cache data lives
 

@@ -5,3 +5,7 @@ lefthook-local.yml
 *.local.json
 *.local.env
 node_modules/
+__pycache__/
+*.pyc
+.ruff_cache/
+.venv/

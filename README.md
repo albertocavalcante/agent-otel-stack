@@ -4,18 +4,22 @@ OpenTelemetry for **Claude Code** and **GitHub Copilot**: enablement per surface
 redaction-first collector config, and checks that run without a collector.
 
 > [!CAUTION]
-> **Seven ways a working-looking setup gives you wrong or missing data. None of
+> **Eight ways a working-looking setup gives you wrong or missing data. None of
 > them error.**
 
 ## Verify your build
 
 ```sh
-just smoke     # what Claude Code actually emits here — no collector, two prompts
+just smoke          # what Claude Code actually emits here — no collector, two prompts
+just copilot-smoke  # what Copilot's exporter actually does — no seat, no calls
 ```
 
-It runs `claude -p` twice, so it makes two billed calls and writes a session
-transcript to `~/.claude/projects/` like any other run. Only the OTel output
-goes to a temp dir, which is deleted.
+`just smoke` runs `claude -p` twice, so it makes two billed calls and writes a
+session transcript to `~/.claude/projects/` like any other run. Only the OTel
+output goes to a temp dir, which is deleted.
+
+`just copilot-smoke` costs nothing and needs no sign-in: Copilot ships built into
+VS Code, so its exporter is read straight off disk.
 
 Claims below are pinned to Claude Code **v2.1.220** and verified **2026-09-12**;
 `just smoke` re-verifies them on whatever you are running.
@@ -31,20 +35,26 @@ Claims below are pinned to Claude Code **v2.1.220** and verified **2026-09-12**;
 | Cache-hit rate from | **metrics** | **traces only** | **traces only** |
 
 VS Code also runs an **agent host process** alongside the chat extension; managed
-telemetry is documented as applying to both. Whether it needs its own settings
-namespace is **unconfirmed** — see [docs/04-surfaces.md](docs/04-surfaces.md).
+telemetry applies to both, and it has its own confirmed `chat.agentHost.otel.*`
+namespace — see [docs/04-surfaces.md](docs/04-surfaces.md).
 
-## The seven traps
+Copilot ships **built into VS Code**, so its settings schema and its exporter
+code are readable on disk with no seat. Copilot claims here are pinned to
+copilot-chat **0.60.0** / VS Code **1.132.0** and verified **2026-09-21**;
+`just copilot-check` re-verifies them on your install.
+
+## The eight traps
 
 | # | Symptom | Cause | Fix |
 |---|---|---|---|
 | [1](#1-no-default-protocol) | Nothing arrives, no error | `OTEL_EXPORTER_OTLP_PROTOCOL` has no default and throws | Set it explicitly |
-| [2](#2-the-copilot-cli-refuses-http) | VS Code data arrives, CLI data never does | CLI silently drops `http://` endpoints | TLS, or the file exporter |
+| [2](#2-the-copilot-cli-refuses-http) | VS Code data arrives, CLI data never does | CLI silently drops `http://` endpoints | TLS in front of the collector |
 | [3](#3-delta-versus-cumulative) | Dead for 60 s, then wrong counters | `delta` default, 60 s interval | `cumulative`, 10 s |
 | [4](#4-two-identifiers-you-cannot-turn-off) | Team emails in your TSDB, permanently | `user.email` has no kill switch | The collector |
 | [5](#5-response-logging-turns-itself-on) | Model output exported after an upgrade | `OTEL_LOG_ASSISTANT_RESPONSES` inherits the prompt flag | Set it to `0` |
 | [6](#6-nano_aiu-is-duplicated-onto-children) | Copilot cost roughly doubled | `nano_aiu` is stamped on parent *and* children | Root span only |
 | [7](#7-copilot-has-no-cost-metric) | No Copilot cost at all | Copilot emits none | Usage Metrics API |
+| [8](#8-the-file-exporter-writes-empty-spans) | A big file of valid JSON, zero traces in it | `JSON.stringify` hits a circular span reference; the `catch` writes `{}` | Never `outfile` for traces — `enabled` **+** `dbSpanExporter` |
 
 ### 1. No default protocol
 
@@ -104,6 +114,31 @@ per-request **model multiplier, not a currency value**.
 `claude_code.cost.usage`. Until then, Copilot cost comes from the Usage Metrics
 API, not from OTel.
 
+### 8. The file exporter writes empty spans
+
+Set `github.copilot.chat.otel.outfile` and every span line on disk is the literal
+two-byte string `{}`. The exporter serialises with a hand-rolled `JSON.stringify`
+in a `try`/`catch` that returns `{}`; the span reaches its own
+`BatchSpanProcessor` through the provider's span-processor chain, and that
+processor holds a reference back to itself, so the stringify throws
+`Converting circular structure to JSON` every time and the catch swallows it.
+
+`outfile` — not `exporterType` — is the trigger. `exporterType: "file"` with no
+`outfile` writes nothing and falls back to OTLP on `localhost:4318`.
+
+Logs and metrics survive, but in the SDK's internal shape rather than OTLP/JSON,
+and all three signals land in **one file with no type discriminator**.
+
+**`{}` is valid JSON**, which is what makes this a trap rather than a bug you
+notice: a record-counting check reports a file of nothing as tens of thousands of
+healthy records. `grep -c '^{}$'` is the honest count, and
+`just copilot-smoke <dump>` runs it for you.
+
+The sink to use instead is `dbSpanExporter.enabled` — **together with**
+`enabled: true`, because on its own it replaces your span exporter with one that
+silently drops everything. Full detail in
+[docs/02-copilot.md](docs/02-copilot.md).
+
 ## What each harness emits
 
 | | Claude Code | GitHub Copilot |
@@ -142,11 +177,21 @@ first. `just smoke` prints your version.
 | [`docs/05-normalization.md`](docs/05-normalization.md) | Joining the three shapes — and what cannot be joined |
 | [`otel/collector.yaml`](otel/collector.yaml) | Redaction-first collector, `otelcol-contrib` 0.160.0 |
 | [`otel/env/`](otel/env/) | Per-surface enablement — the lines you actually set |
-| `tools/smoke.sh` | `just smoke` — verifies the surface on your build |
-| `tools/otel-check.sh` | Validates the collector config **without the collector binary** |
+| `tools/smoke.sh` | `just smoke` — verifies Claude Code's surface on your build |
+| `tools/copilot_smoke.py` | `just copilot-smoke` — verifies Copilot's surface **with no seat** |
+| `tools/copilot_check.py` | Fails if a documented Copilot setting's **name, type or default** has drifted |
+| `tools/otel_check.py` | Validates the collector config **without the collector binary** |
 | `tools/dash-check.sh` | Rejects dashboards that won't bind to a provisioned datasource |
-| `tools/lib/common.sh` | Shared helpers and the leak pattern |
+| `tools/paths.py` | Fails if a comment points at a repo file that does not exist |
+| `tools/leaks.sh` · `links.sh` · `refs.sh` | Credential-shaped strings, relative links, reference-style links |
+| `tools/lint.sh` · `fmt.sh` | shellcheck + ruff, shfmt + ruff format — both languages, one command each |
+| `tools/lib/common.sh` · `lib/report.py` | Shared helpers; the two halves print identical glyphs |
 | `justfile` · `lefthook.yml` | `just check` runs every gate; lefthook runs it pre-commit |
+
+Every tool is written in exactly one language, chosen by what it does: the gates
+that parse structure are Python, the gates that orchestrate other binaries are
+shell. Nothing embeds one language inside the other, because a heredoc body is
+invisible to both linters.
 
 ## Status
 
