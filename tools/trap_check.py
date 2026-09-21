@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Fail if the README's trap table has drifted from its own sections.
+
+Run by `just trap-check`.
+
+The trap table is the front door of this repository, and until now nothing
+verified it. `just links` skips any target beginning with `#` and strips
+fragments from the rest; `just refs` only handles reference-style links; `just
+paths` needs a slash and a file extension. So a misspelled anchor rendered as a
+dead link on GitHub and `just check` stayed green.
+
+The count is part of the claim too. "Eleven ways a working-looking setup gives
+you wrong or missing data" is a promise about the table directly beneath it, and
+a table that grew without the sentence changing makes the landing page lie.
+"""
+
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+import report
+
+GATE = "trap-check"
+DOC = "README.md"
+
+ROW = re.compile(r"^\|\s*\[(\d+)\]\(#([^)]+)\)\s*\|")
+HEADING = re.compile(r"^###\s+(\d+)\.\s+(.*?)\s*$")
+COUNT_SENTENCE = re.compile(r"^>\s*\*\*(\w+) ways a working-looking setup", re.IGNORECASE)
+SECTION_HEADING = re.compile(r"^##\s+The (\w+) traps\s*$", re.IGNORECASE)
+
+NUMBER_WORDS = {
+    1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven",
+    8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen",
+    14: "fourteen", 15: "fifteen", 16: "sixteen", 17: "seventeen", 18: "eighteen",
+    19: "nineteen", 20: "twenty",
+}  # fmt: skip
+
+
+def anchor_for(heading: str) -> str:
+    """GitHub's anchor algorithm, as far as this document exercises it.
+
+    All four rules below are exercised by the existing table: backticks in trap
+    2 and 6, `://` in trap 2, and an underscore in trap 6 that must survive.
+    """
+    text = heading.lower()
+    text = text.replace("`", "")
+    text = re.sub(r"[^\w\s-]", "", text)  # drops . : / etc, keeps _ via \w
+    text = re.sub(r"\s+", "-", text.strip())
+    return text
+
+
+def main() -> int:
+    report.enter_repo_root()
+
+    lines = Path(DOC).read_text(encoding="utf-8").splitlines()
+
+    rows: list[tuple[int, int, str]] = []
+    headings: dict[int, tuple[int, str]] = {}
+    stated_count: tuple[int, str] | None = None
+    stated_heading: tuple[int, str] | None = None
+
+    for n, line in enumerate(lines, 1):
+        row = ROW.match(line)
+        if row:
+            rows.append((n, int(row.group(1)), row.group(2)))
+        heading = HEADING.match(line)
+        if heading:
+            headings[int(heading.group(1))] = (n, heading.group(2))
+        count = COUNT_SENTENCE.match(line)
+        if count:
+            stated_count = (n, count.group(1).lower())
+        section = SECTION_HEADING.match(line)
+        if section:
+            stated_heading = (n, section.group(1).lower())
+
+    errors: list[str] = []
+
+    # Negative control. Zero rows would otherwise satisfy every assertion below
+    # and report a green table that does not exist.
+    if not rows:
+        report.warn(GATE, f"{DOC} has no trap table rows — cannot conclude")
+        report.ok(GATE, "skipped: no trap table found to check")
+        return 0
+
+    for n, number, anchor in rows:
+        if number not in headings:
+            errors.append(f"{DOC}:{n} row {number} has no matching `### {number}.` section")
+            continue
+        heading_line, heading_text = headings[number]
+        want = anchor_for(f"{number}. {heading_text}")
+        if anchor != want:
+            errors.append(
+                f"{DOC}:{n} row {number} links to '#{anchor}' but its section at "
+                f"line {heading_line} anchors as '#{want}' — a dead link no other gate sees"
+            )
+
+    numbers = [number for _, number, _ in rows]
+    expected = list(range(1, len(numbers) + 1))
+    if numbers != expected:
+        errors.append(
+            f"{DOC} trap rows are numbered {numbers}, which is not a contiguous "
+            f"run from 1 — a reader cannot tell whether one is missing"
+        )
+
+    orphans = sorted(set(headings) - set(numbers))
+    for number in orphans:
+        errors.append(
+            f"{DOC}:{headings[number][0]} has a `### {number}.` section with no row "
+            f"in the trap table"
+        )
+
+    word = NUMBER_WORDS.get(len(rows))
+    for label, stated in (("count sentence", stated_count), ("section heading", stated_heading)):
+        if stated is None:
+            errors.append(f"{DOC} no longer states the trap count in its {label}")
+        elif word and stated[1] != word:
+            errors.append(
+                f"{DOC}:{stated[0]} {label} says '{stated[1]}' but the table has "
+                f"{len(rows)} rows ({word})"
+            )
+
+    for error in errors:
+        report.fail(GATE, error)
+    if errors:
+        return 1
+
+    report.ok(GATE, f"{len(rows)} traps: every anchor resolves and the count agrees")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(report.guard(GATE, main))

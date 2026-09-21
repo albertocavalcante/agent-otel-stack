@@ -1,7 +1,7 @@
 default: check
 
 # Run every repository check
-check: leaks links refs paths lint fmt-check otel-check dash-check copilot-check
+check: leaks links refs paths trap-check lint fmt-check otel-check dash-check copilot-check
     @echo "✓ all checks passed"
 
 # Fail if personal paths or credential-shaped strings would be committed
@@ -20,7 +20,11 @@ refs:
 paths:
     @./tools/paths.py
 
-# Structurally validate otel/collector.yaml without needing the collector binary
+# Fail if a README trap anchor is dead or the stated trap count has drifted
+trap-check:
+    @./tools/trap_check.py
+
+# Structurally validate both collector configs without needing the binary
 otel-check:
     @./tools/otel_check.py
 

@@ -1,0 +1,256 @@
+# OpenTelemetry Collector — the AGENT half, running on the developer machine.
+# Targets otelcol-contrib 0.161.0 — `attributes`, `redaction` and
+# `file_storage` are contrib-only; the core image cannot do this.
+#
+# This is the half that has to survive a laptop. It sleeps, it loses the
+# network, it gets killed, and the gateway it exports to is not always
+# reachable. Everything below exists because of one or another of those.
+#
+# Two reasons it exists at all, in order of how often they bite:
+#
+#   1. Durability. The harnesses have none. Copilot Chat wraps the stock
+#      BatchSpanProcessor with no retry, no resend queue and no disk spill, so
+#      when nothing is listening the batch is dropped and you get one
+#      rate-limited warning per 60s. A collector that is always running and
+#      queues to disk is the only thing standing between a closed laptop lid
+#      and a hole in your data.
+#   2. Redaction. `user.email` and `organization.id` have no client-side kill
+#      switch. See README trap 4.
+#
+# Export target is the gateway, not the backends — see collector-gateway.yaml
+# next to this file.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  # MUST be first in every pipeline. If it is not, the collector can OOM before
+  # the limiter ever sees the data it is meant to be limiting.
+  #
+  # It has no disk-pressure awareness whatsoever. A full volume under
+  # file_storage is a separate, uncovered failure mode; `max_size` below is the
+  # only bound, and it fails writes rather than evicting.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # 1. Direct identifiers with no client-side kill switch.
+  #
+  # Hashed, not deleted, where the dimension is useful. Be honest about what
+  # that buys: this is PSEUDONYMISATION, not anonymisation. The hash is
+  # unsalted, so anyone holding your member list can compute the same digest
+  # for every candidate and reverse the mapping. It stops casual reading and
+  # accidental egress; it does not defeat someone who wants the answer. For a
+  # real guarantee use the redaction processor's keyed hmac-sha256.
+  attributes/scrub:
+    actions:
+      - key: user.email
+        action: delete
+      - key: organization.id
+        action: hash
+      - key: user.account_uuid
+        action: hash
+      - key: user.account_id
+        action: hash
+      # Copilot: always on, survives captureContent=false, no setting of
+      # their own.
+      - key: github.copilot.git.repository
+        action: delete
+      - key: github.copilot.git.branch
+        action: delete
+      - key: github.copilot.git.commit_sha
+        action: delete
+      # Claude Code sets this from CLAUDE_CODE_WORKSPACE_HOST_PATHS.
+      - key: workspace.host_paths
+        action: delete
+
+  # 2. Content, if any of the opt-in gates are on — and, on Copilot, even when
+  # they are not: tool arguments and results are reported to export
+  # unconditionally (microsoft/vscode#325720, open). Deny-list mode: keep the
+  # keys so the shape stays legible, scrub the values.
+  #
+  # Scrub HERE, on the agent, not on the gateway. Anything that reaches the
+  # sending queue is already on disk in plaintext, and a queue that survives a
+  # reboot is a queue that survives a laptop theft.
+  #
+  # Stability: the redaction processor is beta for traces and ALPHA for logs and
+  # metrics. Two of the three pipelines below depend on an alpha component.
+  redaction/content:
+    allow_all_keys: true
+    blocked_key_patterns:
+      # Claude Code. Names taken from the attribute tables in
+      # https://code.claude.com/docs/en/monitoring-usage — a generic ".*prompt$"
+      # misses system_prompt_preview, and "^body$" matches nothing Claude Code
+      # actually emits.
+      - ".*prompt.*"
+      - ".*response.*"
+      - "^api_(request|response)_body$"
+      - "^full_command$"
+      - "^tool\\.output$"
+      - "^tool_input$"
+      - "^tool_parameters$"
+      - "^new_context$"
+      - "^hook_definitions$"
+      - "^file_path$"
+      # GitHub Copilot, populated when content capture is on — and, per
+      # microsoft/vscode#325720, sometimes when it is off.
+      - "gen_ai\\.input\\.messages"
+      - "gen_ai\\.output\\.messages"
+      - "gen_ai\\.system_instructions"
+      - "gen_ai\\.tool\\.definitions"
+      - "gen_ai\\.tool\\.call\\.arguments"
+      - "gen_ai\\.tool\\.call\\.result"
+    blocked_values:
+      - '[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}'
+      - 'sk[-]ant[-][A-Za-z0-9_\-]{20,}'
+      - 'gh[pousr]_[A-Za-z0-9]{20,}'
+    hash_function: sha3
+    summary: silent
+
+  # 3. Cardinality. session.id defaults ON and is a fresh UUID per session, so it
+  # mints a new time series per session per metric. Dropped from METRICS only —
+  # it stays on logs and traces, where high cardinality is cheap and where you
+  # actually need it to correlate a turn.
+  attributes/metrics_cardinality:
+    actions:
+      - key: session.id
+        action: delete
+      - key: ccr.session.id
+        action: delete
+
+  # Prometheus stores cumulative. Claude Code can be told to emit cumulative via
+  # OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE, but Copilot exposes no
+  # such setting — converting here covers every surface at once, including any
+  # client that ignores the env var.
+  deltatocumulative:
+    max_stale: 5m
+
+  # MUST be last. Unlike the others it is order-sensitive relative to export.
+  #
+  # > [!CAUTION]
+  # > This processor has NO `storage` option, and nothing below protects it.
+  # > Whatever is sitting in the batch when the process dies is gone. The
+  # > persistent queue starts one component later. `timeout` is therefore the
+  # > size of the loss window, which is why it is 5s and not a minute.
+  batch:
+    send_batch_size: 1024
+    timeout: 5s
+
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+    path: /ready
+
+  # Bearer token for the gateway. Kept out of this file deliberately: `just
+  # leaks` scans for credential-shaped strings precisely because this is where
+  # one would end up.
+  bearertokenauth:
+    scheme: Bearer
+    token: ${env:OTEL_GATEWAY_TOKEN}
+
+  # The queue's backing store. bbolt on disk, so a restart resumes instead of
+  # starting empty.
+  #
+  # fsync defaults to FALSE, which survives a process SIGKILL — the page cache
+  # outlives the process — but not an OS crash or power loss, which lose the
+  # unsynced tail. On a laptop that is a real event, so it is on here.
+  #
+  # max_size bounds the file, and it fails CLOSED: at the ceiling it rejects new
+  # writes rather than evicting the oldest entries. There is no age-based
+  # eviction. Compaction reclaims space after the queue drains.
+  file_storage/queue:
+    directory: ${env:OTEL_AGENT_STATE_DIR}
+    create_directory: true
+    directory_permissions: "0700"
+    fsync: true
+    max_size: 2147483648
+    compaction:
+      on_start: true
+      on_rebound: true
+      directory: ${env:OTEL_AGENT_STATE_DIR}
+      rebound_needed_threshold_mib: 100
+      rebound_trigger_threshold_mib: 10
+
+exporters:
+  # The otlphttp exporter appends the signal path, so a base of `/otlp` becomes
+  # `/otlp/v1/metrics`. Set the BASE endpoint, never the full path.
+  otlphttp/gateway:
+    endpoint: ${env:OTEL_GATEWAY_ENDPOINT}
+    auth:
+      authenticator: bearertokenauth
+
+    # > [!CAUTION]
+    # > `max_elapsed_time` defaults to 300s, and expiry is DESTRUCTIVE. When it
+    # > runs out, retry_sender returns "no more retries left", queue_sender
+    # > logs `Exporting failed. Dropping data.`, and persistent_queue.onDone()
+    # > DELETES the item from bbolt. It does not survive a restart.
+    # >
+    # > A laptop that sleeps overnight with a backlog wakes, retries for five
+    # > minutes against a gateway it cannot reach yet, and destroys data that
+    # > was sitting safely on disk. Zero — retry forever — is the only correct
+    # > value for a machine that goes offline.
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 5m
+      max_elapsed_time: 0
+
+    # The durable buffer. `storage` is what makes it survive a restart; without
+    # it the queue is memory-only and the extension above is decorative.
+    #
+    # block_on_overflow defaults to FALSE, which DROPS when the queue is full
+    # rather than applying backpressure. On an agent, dropping is the one thing
+    # we are here to prevent.
+    #
+    # What this does NOT buy: delivery is AT-LEAST-ONCE. A kill between the
+    # backend's ack and onDone()'s delete replays the item on restart. Plan for
+    # duplicates; there is no exactly-once here, and no WAL for traces anywhere
+    # in this ecosystem — only this queue.
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+      sizer: items
+      queue_size: 200000
+      num_consumers: 4
+      block_on_overflow: true
+
+service:
+  extensions: [health_check, bearertokenauth, file_storage/queue]
+
+  # Self-observability. Without it the queue is a black box: you cannot tell a
+  # healthy idle agent from one that has been failing to export for a day.
+  # Watch otelcol_exporter_send_failed_*, otelcol_exporter_enqueue_failed_* and
+  # queue_size against queue_capacity.
+  #
+  # Note otelcol_exporter_queue_size does NOT reflect on-disk depth once
+  # storage is configured (contrib#30608) — cross-check the directory size. And
+  # no metric anywhere reports the AGE of the oldest queued item.
+  telemetry:
+    metrics:
+      level: normal
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8888
+
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub, redaction/content, attributes/metrics_cardinality, deltatocumulative, batch]
+      exporters: [otlphttp/gateway]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub, redaction/content, batch]
+      exporters: [otlphttp/gateway]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub, redaction/content, batch]
+      exporters: [otlphttp/gateway]

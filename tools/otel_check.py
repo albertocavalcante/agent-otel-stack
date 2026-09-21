@@ -22,12 +22,85 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import report
 
 GATE = "otel-check"
-CONFIG = "otel/collector.yaml"
+
+# The agent runs on a laptop and must survive it; the gateway runs beside the
+# backends and does not carry a queue. Only the agent is held to the durability
+# rules below.
+AGENT = "otel/collector-agent.yaml"
+GATEWAY = "otel/collector-gateway.yaml"
+CONFIGS = (AGENT, GATEWAY)
 
 
 def names(doc: dict, section: str) -> set[str]:
     block = doc.get(section) or {}
     return set(block) if isinstance(block, dict) else set()
+
+
+def body(doc: dict, section: str, name: str) -> dict:
+    """A single component's own config, empty when absent or not a mapping."""
+    block = doc.get(section) or {}
+    if not isinstance(block, dict):
+        return {}
+    spec = block.get(name) or {}
+    return spec if isinstance(spec, dict) else {}
+
+
+def check_durability(doc: dict) -> list[str]:
+    """Assert the agent can lose its network and its process without losing data.
+
+    Every one of these defaults is silent. A collector with none of them set
+    starts, runs, reports success, and drops everything in flight the moment it
+    restarts — which is the failure this repository exists to document.
+    """
+    errors: list[str] = []
+
+    storages = {n for n in names(doc, "extensions") if n.split("/")[0] == "file_storage"}
+    if not storages:
+        errors.append(
+            "no `file_storage` extension — the sending queue would be memory-only, "
+            "so a restart silently discards whatever is in flight"
+        )
+
+    declared = {str(x) for x in (doc.get("service") or {}).get("extensions") or []}
+    for storage in sorted(storages - declared):
+        errors.append(
+            f"`{storage}` is defined but missing from `service.extensions` — "
+            f"an extension the service does not list never starts"
+        )
+
+    for name in sorted(names(doc, "exporters")):
+        spec = body(doc, "exporters", name)
+
+        queue = spec.get("sending_queue")
+        if not isinstance(queue, dict) or queue.get("enabled") is not True:
+            errors.append(
+                f"exporter `{name}` enables no `sending_queue` — a collector restart "
+                f"silently discards whatever is in flight"
+            )
+        else:
+            if not queue.get("storage"):
+                errors.append(
+                    f"exporter `{name}`.sending_queue sets no `storage` — the queue is "
+                    f"memory-only and does not survive a restart"
+                )
+            if queue.get("block_on_overflow") is not True:
+                errors.append(
+                    f"exporter `{name}`.sending_queue does not set "
+                    f"`block_on_overflow: true` — the default DROPS when the queue fills"
+                )
+
+        retry = spec.get("retry_on_failure")
+        if not isinstance(retry, dict) or retry.get("enabled") is not True:
+            errors.append(f"exporter `{name}` enables no `retry_on_failure`")
+        elif retry.get("max_elapsed_time") not in (0, "0", "0s"):
+            errors.append(
+                f"exporter `{name}`.retry_on_failure sets "
+                f"`max_elapsed_time: {retry.get('max_elapsed_time')}` — on expiry the "
+                f"item is DELETED from disk, so a long offline period destroys a "
+                f"backlog that was already safely persisted. Use 0"
+            )
+
+    return errors
 
 
 def check(doc: dict) -> list[str]:
@@ -92,6 +165,18 @@ def check(doc: dict) -> list[str]:
     return errors
 
 
+def load(yaml, path: str) -> dict:
+    config = Path(path)
+    if not config.is_file():
+        report.die(GATE, f"{path} is missing — a deleted config must fail, not pass")
+
+    try:
+        with config.open(encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+    except yaml.YAMLError as exc:
+        report.die(GATE, f"{path} is not valid YAML: {exc}")
+
+
 def main() -> int:
     report.enter_repo_root()
 
@@ -100,23 +185,20 @@ def main() -> int:
     except ImportError:
         report.die(GATE, "PyYAML not available (pip install pyyaml, or brew install yq)")
 
-    config = Path(CONFIG)
-    if not config.is_file():
-        report.die(GATE, f"{CONFIG} is missing — a deleted config must fail, not pass")
+    errors: list[str] = []
+    for path in CONFIGS:
+        doc = load(yaml, path)
+        found = check(doc)
+        if path == AGENT:
+            found += check_durability(doc)
+        errors += [f"{path}: {e}" for e in found]
 
-    try:
-        with config.open(encoding="utf-8") as handle:
-            doc = yaml.safe_load(handle) or {}
-    except yaml.YAMLError as exc:
-        report.die(GATE, f"{CONFIG} is not valid YAML: {exc}")
-
-    errors = check(doc)
     for error in errors:
         report.fail(GATE, error)
     if errors:
         return 1
 
-    report.ok(GATE, f"{CONFIG} is structurally valid")
+    report.ok(GATE, f"{len(CONFIGS)} collector configs are structurally valid and durable")
     return 0
 
 

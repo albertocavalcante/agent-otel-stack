@@ -2,7 +2,7 @@
 
 Both harnesses default to **no prompt content**. Neither defaults to no identity.
 Those are different guarantees and the gap between them is why
-[`../otel/collector.yaml`](../otel/collector.yaml) exists.
+[`../otel/collector-agent.yaml`](../otel/collector-agent.yaml) exists.
 
 ## The two you cannot turn off
 
@@ -76,7 +76,7 @@ Assume Copilot prompt content may leave the machine whatever the setting says.
 
 ## What the collector does about it
 
-[`../otel/collector.yaml`](../otel/collector.yaml), in order:
+[`../otel/collector-agent.yaml`](../otel/collector-agent.yaml), in order:
 
 1. **`attributes/scrub`** — deletes `user.email` and the Copilot git attributes;
    hashes `organization.id` and `user.account_uuid`.
@@ -107,6 +107,11 @@ Assume Copilot prompt content may leave the machine whatever the setting says.
   token to ingest only.
 - On a shared or enterprise machine, managed settings override everything you set
   — including the endpoint. Your telemetry may already have a destination.
+- And on any machine, so does the ambient environment. `OTEL_EXPORTER_OTLP_ENDPOINT`
+  **enables Copilot Chat's export by its presence alone** — no `enabled` setting
+  required. Export it for Claude Code, which treats it as inert without
+  `CLAUDE_CODE_ENABLE_TELEMETRY=1`, and you have switched on a second harness
+  pointed at the same collector. See README trap 9.
 
 [mon]: https://code.claude.com/docs/en/monitoring-usage
 [i307407]: https://github.com/microsoft/vscode/issues/307407

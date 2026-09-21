@@ -4,7 +4,7 @@ OpenTelemetry for **Claude Code** and **GitHub Copilot**: enablement per surface
 redaction-first collector config, and checks that run without a collector.
 
 > [!CAUTION]
-> **Eight ways a working-looking setup gives you wrong or missing data. None of
+> **Eleven ways a working-looking setup gives you wrong or missing data. None of
 > them error.**
 
 ## Verify your build
@@ -43,7 +43,7 @@ code are readable on disk with no seat. Copilot claims here are pinned to
 copilot-chat **0.60.0** / VS Code **1.132.0** and verified **2026-09-21**;
 `just copilot-check` re-verifies them on your install.
 
-## The eight traps
+## The eleven traps
 
 | # | Symptom | Cause | Fix |
 |---|---|---|---|
@@ -55,6 +55,9 @@ copilot-chat **0.60.0** / VS Code **1.132.0** and verified **2026-09-21**;
 | [6](#6-nano_aiu-is-duplicated-onto-children) | Copilot cost roughly doubled | `nano_aiu` is stamped on parent *and* children | Root span only |
 | [7](#7-copilot-has-no-cost-metric) | No Copilot cost at all | Copilot emits none | Usage Metrics API |
 | [8](#8-the-file-exporter-writes-empty-spans) | A big file of valid JSON, zero traces in it | `JSON.stringify` hits a circular span reference; the `catch` writes `{}` | Never `outfile` for traces — `enabled` **+** `dbSpanExporter` |
+| [9](#9-the-endpoint-variable-is-an-on-switch) | Copilot exporting when you only configured Claude Code | `OTEL_EXPORTER_OTLP_ENDPOINT` alone enables Copilot's OTel | Know it is a switch, not just a destination |
+| [10](#10-a-typo-in-the-endpoint-sends-data-to-localhost) | A remote endpoint configured, nothing ever arrives | `new URL()` throws, the catch falls back to `localhost:4318` | Check `enabledVia` in the Copilot Chat log |
+| [11](#11-the-protocol-setting-and-the-variable-disagree) | `protocol: "grpc"` set, `http/json` on the wire | The setting feeds the protocol only; the env var also feeds transport | Use `exporterType: otlp-grpc` |
 
 ### 1. No default protocol
 
@@ -139,6 +142,58 @@ The sink to use instead is `dbSpanExporter.enabled` — **together with**
 silently drops everything. Full detail in
 [docs/02-copilot.md](docs/02-copilot.md).
 
+### 9. The endpoint variable is an on switch
+
+`OTEL_EXPORTER_OTLP_ENDPOINT` does not merely tell Copilot Chat *where* to
+export. Its presence in the environment **enables export**, with no
+`github.copilot.chat.otel.enabled` set anywhere:
+
+```js
+a = policyEnabled ?? COPILOT_OTEL_ENABLED ?? settingEnabled ?? o ?? !!e.OTEL_EXPORTER_OTLP_ENDPOINT
+```
+
+So exporting that variable for Claude Code — which needs
+`CLAUDE_CODE_ENABLE_TELEMETRY=1` before it treats the same variable as anything
+at all — quietly turns Copilot on too, pointed at the same collector. One
+variable, two harnesses, opposite semantics.
+
+The extension records which path enabled it. `enabledVia: "otlpEndpointEnvVar"`
+in the **GitHub Copilot Chat** output channel means this is what happened to you.
+
+### 10. A typo in the endpoint sends data to localhost
+
+The endpoint is parsed with `new URL()` inside a `try`, and the `catch` returns
+nothing:
+
+```js
+function YNi(n, e) { try { let r = new URL(t); return e === "grpc" ? r.origin : r.href } catch { return } }
+g = YNi(A, d) ?? "http://localhost:4318"
+```
+
+A malformed value does not warn and does not abort. It falls back to
+`http://localhost:4318`, where on most machines nothing is listening — so a
+mistyped remote collector looks exactly like a correctly configured one that
+happens to be quiet.
+
+### 11. The protocol setting and the variable disagree
+
+`github.copilot.chat.otel.protocol` advertises `grpc` in its enum. Setting it to
+`grpc` gives you `http/json`.
+
+```js
+d = (… ?? OTEL_EXPORTER_OTLP_PROTOCOL ?? COPILOT_OTEL_PROTOCOL ?? (settingExporterType…)) === "grpc" ? "grpc" : "http"
+p = policyProtocol ?? OTEL_EXPORTER_OTLP_PROTOCOL ?? COPILOT_OTEL_PROTOCOL ?? settingProtocol
+m = d === "grpc" ? "grpc" : p === "http/protobuf" ? "http/protobuf" : "http/json"
+```
+
+`settingProtocol` reaches only `p`. The **environment variable of the same name
+also reaches `d`**, the transport selector. With `exporterType: otlp-http`, `d`
+is `"http"`, so `m` can only be `http/protobuf` or `http/json` — the setting's
+own advertised value is unreachable.
+
+`OTEL_EXPORTER_OTLP_PROTOCOL=grpc` works. The identically-named setting does not.
+Select gRPC with `exporterType: otlp-grpc`.
+
 ## What each harness emits
 
 | | Claude Code | GitHub Copilot |
@@ -175,7 +230,8 @@ first. `just smoke` prints your version.
 | [`docs/03-privacy.md`](docs/03-privacy.md) | What leaves the machine, and what cannot be turned off |
 | [`docs/04-surfaces.md`](docs/04-surfaces.md) | Claude Code vs Copilot-VS Code vs Copilot-CLI, side by side |
 | [`docs/05-normalization.md`](docs/05-normalization.md) | Joining the three shapes — and what cannot be joined |
-| [`otel/collector.yaml`](otel/collector.yaml) | Redaction-first collector, `otelcol-contrib` 0.160.0 |
+| [`otel/collector-agent.yaml`](otel/collector-agent.yaml) | Laptop-resident: redaction **and** a queue that survives sleep |
+| [`otel/collector-gateway.yaml`](otel/collector-gateway.yaml) | Beside the backends: fan-out to Prometheus, Loki, Tempo |
 | [`otel/env/`](otel/env/) | Per-surface enablement — the lines you actually set |
 | `tools/smoke.sh` | `just smoke` — verifies Claude Code's surface on your build |
 | `tools/copilot_smoke.py` | `just copilot-smoke` — verifies Copilot's surface **with no seat** |
@@ -183,6 +239,7 @@ first. `just smoke` prints your version.
 | `tools/otel_check.py` | Validates the collector config **without the collector binary** |
 | `tools/dash-check.sh` | Rejects dashboards that won't bind to a provisioned datasource |
 | `tools/paths.py` | Fails if a comment points at a repo file that does not exist |
+| `tools/trap_check.py` | Fails on a dead trap anchor or a stale trap count — nothing else sees these |
 | `tools/leaks.sh` · `links.sh` · `refs.sh` | Credential-shaped strings, relative links, reference-style links |
 | `tools/lint.sh` · `fmt.sh` | shellcheck + ruff, shfmt + ruff format — both languages, one command each |
 | `tools/lib/common.sh` · `lib/report.py` | Shared helpers; the two halves print identical glyphs |

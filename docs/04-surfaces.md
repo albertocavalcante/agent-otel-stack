@@ -5,15 +5,22 @@ telemetry producers**, and two of them are both called Copilot.
 
 | | Claude Code | Copilot — VS Code | Copilot — CLI |
 |---|---|---|---|
-| **Enabled by** | `CLAUDE_CODE_ENABLE_TELEMETRY=1` | `github.copilot.chat.otel.enabled` | `COPILOT_OTEL_ENABLED` |
+| **Enabled by** | `CLAUDE_CODE_ENABLE_TELEMETRY=1` | `otel.enabled` — **or `OTEL_EXPORTER_OTLP_ENDPOINT` alone** | `COPILOT_OTEL_ENABLED`, or the endpoint alone |
 | **Configured in** | env / `settings.json` `env` block | VS Code settings | env only |
 | **Metric namespace** | `claude_code.*` | `copilot_chat.*` | `github.copilot.*` |
 | **Signals** | metrics, events, beta traces | traces + metrics | traces + metrics |
 | **Cost metric** | ✅ `claude_code.cost.usage` | ❌ | ❌ |
 | **Billing attrs on spans** | n/a | ❌ **none at all** | ✅ `nano_aiu`, `cost` |
 | **Exports to `http://`** | ✅ | ✅ | ❌ **silently refuses** |
-| **Transport** | grpc, http/json, http/protobuf | otlp-http, otlp-grpc, console, file | otlp-http, file — **no grpc** |
-| **Default protocol** | **none — throws** | `otlp-http` | `otlp-http` |
+| **Exporter selection** | `OTEL_{METRICS,LOGS,TRACES}_EXPORTER` | `exporterType`: otlp-http, otlp-grpc, console, file | `COPILOT_OTEL_EXPORTER_TYPE`: otlp-http, file — **no grpc** |
+| **Default exporter** | unset — off | `otlp-http` | `otlp-http` |
+| **Wire protocol** | `OTEL_EXPORTER_OTLP_PROTOCOL` — **none, throws** | `http/json` by default; the `protocol` setting cannot select grpc | `http/json`; `http/protobuf` needs v1.0.61+ |
+
+> [!NOTE]
+> The middle two rows are not the same question. `otlp-http` and `file` are
+> **exporter types** — `console` and `file` are sinks, not transports — while
+> `http/json` and `grpc` are wire protocols. Copilot exposes both as separate
+> settings and they interact badly: see README trap 11.
 
 Everything below is a consequence of that table.
 

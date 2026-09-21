@@ -8,7 +8,8 @@
 # plus dash, max 40 characters. `just dash-check` enforces the same rule here,
 # and that every uid a dashboard references is one of these.
 #
-# Service names match otel/collector.yaml's exporter endpoints.
+# Service names match otel/collector-gateway.yaml's exporter endpoints. The
+# agent config exports to the gateway, not to these.
 
 apiVersion: 1
 

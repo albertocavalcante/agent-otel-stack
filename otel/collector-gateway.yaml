@@ -1,10 +1,19 @@
-# OpenTelemetry Collector for Claude Code and GitHub Copilot.
-# Targets otelcol-contrib 0.160.0 — `attributes` and `redaction` are
+# OpenTelemetry Collector — the GATEWAY half, running beside the backends.
+# Targets otelcol-contrib 0.161.0 — `attributes` and `redaction` are
 # contrib-only; the core image cannot do this.
 #
 # Why a collector when Prometheus, Loki and Tempo all accept OTLP directly:
 # `user.email` and `organization.id` have no client-side kill switch.
 # See README trap 4.
+#
+# This half does NOT carry a persistent queue, and that is deliberate. It runs
+# beside the things it writes to, so the network between them does not
+# disappear for eight hours at a time. The durability lives on the agent, in
+# collector-agent.yaml next to this file, because that is where the laptop is.
+#
+# Point agents here, not at the backends. Redaction runs on the agent, so
+# anything arriving at this collector has already been scrubbed — it is not a
+# second chance, and it is not a substitute for the agent's processors.
 
 receivers:
   otlp:
