@@ -3,6 +3,13 @@
 OpenTelemetry for **Claude Code** and **GitHub Copilot**: enablement per surface, a
 redaction-first collector config, and checks that run without a collector.
 
+> [!IMPORTANT]
+> **This is documentation and configuration, not a deployment.** There is no
+> compose file, no container and no dashboard JSON. What you get: two collector
+> configs to drop into an `otelcol-contrib` you run yourself, per-surface
+> enablement, and gates that verify the claims below against the build on your
+> machine. If you wanted `docker compose up`, this is not that yet.
+
 > [!CAUTION]
 > **Eleven ways a working-looking setup gives you wrong or missing data. None of
 > them error.**
@@ -31,12 +38,12 @@ Claims below are pinned to Claude Code **v2.1.220** and verified **2026-09-12**;
 | Metric namespace | `claude_code.*` | `copilot_chat.*` | `github.copilot.*` |
 | Cost metric | ✅ | ❌ | ❌ |
 | Billing attrs on spans | n/a | ❌ none | ✅ `nano_aiu` |
-| Exports to `http://` | ✅ | ✅ | ❌ **refuses on v1.0.80+** — unreproduced, trap 2 |
+| Exports to `http://` | ✅ | ✅ | ✅ — but **refuses to attach managed headers**, trap 2 |
 | Cache-hit rate from | **metrics** | **traces only** | **traces only** |
 
-VS Code also runs an **agent host process** alongside the chat extension; managed
-telemetry applies to both, and it has its own confirmed `chat.agentHost.otel.*`
-namespace — see [docs/04-surfaces.md](docs/04-surfaces.md).
+VS Code also runs an **agent host process** alongside the chat extension. It has
+**no settings of its own**: it binds a loopback OTLP receiver, spawns the CLI as
+a child, and relays — see [docs/04-surfaces.md](docs/04-surfaces.md).
 
 Copilot ships **built into VS Code**, so its settings schema and its exporter
 code are readable on disk with no seat. Copilot claims here are pinned to
@@ -48,7 +55,7 @@ copilot-chat **0.60.0** / VS Code **1.132.0** and verified **2026-09-21**;
 | # | Symptom | Cause | Fix |
 |---|---|---|---|
 | [1](#1-no-default-protocol) | Nothing arrives, no error | `OTEL_EXPORTER_OTLP_PROTOCOL` has no default and throws | Set it explicitly |
-| [2](#2-the-copilot-cli-refuses-http) | VS Code data arrives, CLI data never does | CLI silently drops `http://` endpoints — **v1.0.80+, unreproduced** | TLS, or check your CLI version first |
+| [2](#2-the-cli-refuses-http--for-enterprise-headers-not-for-export) | Enterprise headers never reach the collector | The CLI refuses to stamp managed headers onto a cleartext endpoint | `https://` + `OTEL_EXPORTER_OTLP_CERTIFICATE` |
 | [3](#3-delta-versus-cumulative) | Dead for 60 s, then wrong counters | `delta` default, 60 s interval | `cumulative`, 10 s |
 | [4](#4-two-identifiers-you-cannot-turn-off) | Team emails in your TSDB, permanently | `user.email` has no kill switch | The collector |
 | [5](#5-response-logging-turns-itself-on) | Model output exported after an upgrade | `OTEL_LOG_ASSISTANT_RESPONSES` inherits the prompt flag | Set it to `0` |
@@ -66,24 +73,40 @@ nothing. [`monitoring-usage`][cc-mon] is explicit: *"Claude Code has no default
 protocol, so set this or the signal-specific protocol variable for each `otlp`
 exporter you enable."*
 
-### 2. The Copilot CLI refuses `http://`
+### 2. The CLI refuses `http://` — for enterprise headers, not for export
 
-Export is dropped *"rather than sent in cleartext; startup is not aborted"* — no
-warning, no non-zero exit ([copilot-cli#4567][cli4567], open as of 2026-09-12,
-**reported against CLI v1.0.80**). **The VS Code extension exports to the same
-endpoint fine**, so one collector on `localhost:4318` collects half your data
-silently. Workarounds: [`otel/env/copilot-cli.env`](otel/env/copilot-cli.env).
+What the refusal actually is, read from the CLI runtime bundled inside the
+extension (`@github/copilot` **1.0.73**, native `runtime.node`):
+
+> *"Managed OTLP headers are configured but the managed telemetry endpoint '…'
+> is not https; refusing to transmit the (sensitive) managed headers over
+> cleartext."*
+>
+> *"Managed OTLP headers are configured but no managed telemetry endpoint is
+> set; refusing to stamp the (sensitive) managed headers onto an endpoint
+> resolved from the user-controlled `OTEL_EXPORTER_OTLP_ENDPOINT`."*
+
+So the CLI refuses to **attach enterprise credentials to a cleartext or
+user-controlled endpoint**. It does not refuse to export. If you have no managed
+headers — every individual developer — `http://localhost:4318` is unaffected,
+and the runtime's own `copilot help monitoring` still lists it as the first
+worked example.
+
+That is a narrower and better-behaved thing than "silently drops your
+telemetry", which is how this repo described it until 2026-09-21 on the strength
+of [copilot-cli#4567][cli4567] alone.
 
 > [!WARNING]
-> **This is the one trap here that has never been reproduced.** It is
-> vendor-reported, not observed. On the CLI runtime installed on this machine —
-> v1.0.54, which predates the version the issue was filed against — the refusal
-> is absent and the runtime's **own `copilot help monitoring` text recommends an
-> `http://` endpoint as its first worked example**.
->
-> `just copilot-smoke` reads whatever runtime you have and says which of those
-> you are looking at. Treat the trap as version-bounded: still the first thing
-> to check when CLI data is missing, not a fact about every build.
+> **The original claim remains unreproduced.** No code path was found in any
+> local runtime that drops export purely because the scheme is `http`. If your
+> CLI data is missing and you have no managed telemetry configured, look
+> elsewhere first. `just copilot-smoke` reports what your installed runtimes
+> contain.
+
+The same runtime exposes **mTLS and private-CA support** —
+`OTEL_EXPORTER_OTLP_CERTIFICATE`, `..._CLIENT_CERTIFICATE`, `..._CLIENT_KEY`,
+plus per-signal variants — which is the supported way to point it at an
+`https://` collector you terminate yourself.
 
 ### 3. delta versus cumulative
 
@@ -118,9 +141,15 @@ per-request **model multiplier, not a currency value**.
 
 > [!NOTE]
 > We have not located a GitHub-authored page stating the duplication rule in
-> those words. The behaviour is corroborated by
-> [copilot-cli#4224][cli4224] and by third-party integrations; treat the exact
-> wording as **unverified** until GitHub documents it.
+> those words, and it remains **unverified**.
+>
+> [copilot-cli#4224][cli4224] was previously cited here as corroboration. That
+> was a misattribution: #4224 is about subagent spend being *omitted*, not about
+> `nano_aiu` being *duplicated* — and it reports the root's `nano_aiu` as
+> **equal to** the sum of main-agent chat spans, which is evidence against
+> duplication in that dataset. It is cited correctly under trap 7.
+>
+> #4224 was also **closed 2026-09-20**, resolved in CLI v1.0.86.
 
 ### 7. Copilot has no cost metric
 
@@ -219,7 +248,7 @@ dashboard cannot serve both harnesses — the namespaces and the cost story diff
 
 ## If you are pinned below 2.1.268
 
-Current release is **2.1.269**. All three of these are already fixed upstream —
+Latest release seen was **2.1.278** (checked 2026-09-21); this repo's claims were verified against **2.1.220**. All three of these are already fixed upstream —
 they apply only to older installs, and this repo's claims were verified on
 2.1.220. Sources: [`monitoring-usage`][cc-mon] and the [CHANGELOG][cc-log].
 
@@ -236,7 +265,7 @@ first. `just smoke` prints your version.
 
 | Path | What |
 |---|---|
-| [`docs/01-claude-code.md`](docs/01-claude-code.md) | Enablement, the eight metrics, events, beta traces |
+| [`docs/01-claude-code.md`](docs/01-claude-code.md) | Enablement, metrics, events, beta traces |
 | [`docs/02-copilot.md`](docs/02-copilot.md) | Five surfaces, two engines, span hierarchy |
 | [`docs/03-privacy.md`](docs/03-privacy.md) | What leaves the machine, and what cannot be turned off |
 | [`docs/04-surfaces.md`](docs/04-surfaces.md) | Claude Code vs Copilot-VS Code vs Copilot-CLI, side by side |

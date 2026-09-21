@@ -224,7 +224,21 @@ def inspect_cli_runtime() -> None:
     path, version = found
     print(f"  ✓ runtime: {version}")
 
-    source = (path / copilot.CLI_ENTRYPOINT).read_text(encoding="utf-8", errors="replace")
+    # Two shapes. The standalone unpack is one big app.js; the copy bundled
+    # inside the extension puts its OTel logic in a native addon. Reading only
+    # the first is how a review concluded the refusal did not exist anywhere.
+    blobs = []
+    for candidate in sorted(path.rglob("*")):
+        if candidate.is_file() and candidate.suffix in (".js", ".node"):
+            try:
+                blobs.append(candidate.read_bytes())
+            except OSError:
+                continue
+    source = b"\n".join(blobs).decode("utf-8", errors="replace")
+    if not source:
+        report.note("runtime holds no readable .js or .node")
+        report.warn(GATE, "nothing to read in the runtime — cannot conclude")
+        return
 
     # Negative control FIRST. Without it, a future layout that moves the OTel
     # code out of this file would read as "trap 2 disproved".
@@ -241,7 +255,23 @@ def inspect_cli_runtime() -> None:
     present = [word for word in REFUSAL_FINGERPRINT if word in source]
     if present:
         print(f"  ! refusal fingerprint: {', '.join(present)}")
-        report.warn(GATE, f"CLI {version} appears to refuse http:// — README trap 2 holds here")
+        # Scope matters more than presence. The refusal found in 1.0.73 is about
+        # managed/enterprise headers, not about dropping export — reporting it
+        # as "trap 2 holds" would restate the error this gate exists to correct.
+        managed = "managed" in source.lower() and "headers" in source.lower()
+        if managed:
+            print("    scoped to MANAGED headers — credentials withheld, export proceeds")
+            report.warn(
+                GATE,
+                f"CLI {version} refuses to attach managed headers to a cleartext "
+                f"endpoint; it does NOT drop export — README trap 2",
+            )
+        else:
+            report.warn(
+                GATE,
+                f"CLI {version} carries an unscoped cleartext refusal — re-read it, "
+                f"this would be new behaviour",
+            )
         return
 
     for word in REFUSAL_FINGERPRINT:

@@ -81,10 +81,25 @@ def table_columns(db: sqlite3.Connection, table: str) -> list[str]:
     return [row[1] for row in db.execute(f"PRAGMA table_info({table})")]
 
 
+# Anything outside this is not a millisecond timestamp from this store. The
+# store writes ms; a value in SECONDS renders as 1970 with a checkmark beside
+# it, which is this repository's own thesis reproduced inside its own tool.
+_PLAUSIBLE_MS = (1_000_000_000_000, 4_000_000_000_000)  # 2001-09-09 .. 2096
+
+
 def as_date(ms: int | None) -> str:
-    if not ms:
+    if ms is None:
         return "unknown"
-    return datetime.fromtimestamp(ms / 1000, tz=UTC).strftime("%Y-%m-%d %H:%M")
+    try:
+        value = int(ms)
+    except (TypeError, ValueError):
+        return f"unreadable ({ms!r})"
+    if not (_PLAUSIBLE_MS[0] <= value <= _PLAUSIBLE_MS[1]):
+        return f"implausible ({value}) — not milliseconds?"
+    try:
+        return datetime.fromtimestamp(value / 1000, tz=UTC).strftime("%Y-%m-%d %H:%M")
+    except (OverflowError, OSError, ValueError):
+        return f"unrenderable ({value})"
 
 
 def describe(db: sqlite3.Connection, path: Path, immutable: bool) -> None:
@@ -104,7 +119,12 @@ def describe(db: sqlite3.Connection, path: Path, immutable: bool) -> None:
     except sqlite3.Error:
         version = None
 
-    count = db.execute("SELECT COUNT(*) FROM spans").fetchone()[0]
+    try:
+        count = db.execute("SELECT COUNT(*) FROM spans").fetchone()[0]
+    except sqlite3.Error as exc:
+        report.warn(GATE, f"cannot read spans: {exc}")
+        report.ok(GATE, "inconclusive: the store is not readable as this gate expects")
+        return
     print(f"  ✓ schema_version  {version if version is not None else 'absent'}")
     print(f"  ✓ spans           {count}")
     if immutable:
@@ -116,7 +136,11 @@ def describe(db: sqlite3.Connection, path: Path, immutable: bool) -> None:
         report.ok(GATE, f"store present at schema {version}, empty")
         return
 
-    lo, hi = db.execute("SELECT MIN(start_time_ms), MAX(end_time_ms) FROM spans").fetchone()
+    try:
+        lo, hi = db.execute("SELECT MIN(start_time_ms), MAX(end_time_ms) FROM spans").fetchone()
+    except sqlite3.Error:
+        report.note("start_time_ms/end_time_ms absent — schema has drifted")
+        lo = hi = None
     print(f"  ✓ oldest          {as_date(lo)}")
     print(f"  ✓ newest          {as_date(hi)}")
 
@@ -138,10 +162,14 @@ def describe(db: sqlite3.Connection, path: Path, immutable: bool) -> None:
         else:
             report.note(f"{column} — present but entirely NULL")
 
-    attributes = db.execute("SELECT COUNT(*) FROM span_attributes").fetchone()[0]
-    events = db.execute("SELECT COUNT(*) FROM span_events").fetchone()[0]
-    print(f"\n  ✓ span_attributes {attributes}")
-    print(f"  ✓ span_events     {events}")
+    # Sibling tables are part of the same store but a drifted build may not
+    # have them. Missing is a finding, not a crash.
+    for table in ("span_attributes", "span_events"):
+        try:
+            total = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            print(f"  ✓ {table:16s}{total}")
+        except sqlite3.Error:
+            report.note(f"{table} — table absent")
 
     print()
     report.ok(GATE, f"{count} spans at schema {version}, {as_date(lo)} to {as_date(hi)}")

@@ -13,7 +13,7 @@ rc=0
 grep -rInE "$LEAK_PATTERN" \
   --exclude-dir='.venv' --exclude-dir='.git' \
   --exclude-dir='__pycache__' --exclude-dir='.pytest_cache' --exclude-dir='.ruff_cache' \
-  --include='*.md' --include='*.json' --include='*.sh' --include='*.py' --include='*.env' \
+  --include='*' \
   --include='*.toml' --include='*.yaml' --include='*.yml' --include='justfile' . || rc=$?
 
 # grep: 0 = matched, 1 = no match, 2+ = it could not do its job. Only 1 is clean.

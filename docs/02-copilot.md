@@ -12,73 +12,98 @@ Verified **2026-09-21** against the shipping build: **copilot-chat 0.60.0**, hos
 > verified, and it is what `just copilot-check` and `just copilot-smoke` read.
 
 > [!CAUTION]
-> **Static verification is not live traffic.** The settings schema, the exporter
-> implementation and the agent-host namespace are read from the shipped build and
-> are facts. Three claims are not, and none of them has been observed here: the
-> CLI's `http://` refusal (vendor-documented, see below), the ≥ 1.130
-> billable-span regression ([#328393][vs328393], a third-party report), and
-> content exported despite `captureContent: false` (see
-> [03-privacy.md](03-privacy.md)). Each needs a signed-in session to settle.
+> **Static verification is not live traffic.** The settings schema and the
+> exporter implementation are read from the shipped build and are facts. Two
+> claims here are not, and neither has been observed: the ≥ 1.130 billable-span
+> regression ([#328393][vs328393], a third-party report) and content exported
+> despite `captureContent: false` (see [03-privacy.md](03-privacy.md)). Both
+> need a signed-in session to settle.
+>
+> Static reading is also not infallible. On 2026-09-21 a review of this document
+> found two claims that static reading got **wrong**: a `chat.agentHost.otel.*`
+> namespace that does not exist, and a retention mechanism reported as absent
+> that is present. Both are corrected below, and both came from greps that
+> matched something adjacent to the thing being claimed.
 
 ## It is five surfaces over two engines
 
 Not three parallel implementations — two instrumentation engines behind five
 entry points. The engine matters more than the branding: anything running the CLI
-runtime inherits the CLI's behaviour, including its reported refusal to export
-over `http://` — a claim that is version-bounded and unreproduced, see below.
+runtime inherits the CLI's behaviour, including how it treats managed telemetry
+headers on a cleartext endpoint — see below.
 
 | Surface | Engine | Configured by |
 |---|---|---|
 | VS Code Copilot Chat | own instrumentation | `github.copilot.chat.otel.*` |
-| VS Code **agent host** | CLI runtime in a utility process | `chat.agentHost.otel.*` — see [04-surfaces.md](04-surfaces.md) |
+| VS Code **agent host** | CLI runtime as a stdio child | none of its own — relays to the extension, see [04-surfaces.md](04-surfaces.md) |
 | Copilot CLI | CLI runtime | `COPILOT_OTEL_*` env |
 | Copilot SDK | wraps the CLI runtime | `TelemetryConfig` → env |
 | Copilot desktop | CLI runtime, embedded | env only |
 
 Managed telemetry is documented as applying to *"both the Copilot Chat extension
-and the agent host process"* — which is only worth saying if they are separately
-configurable, and they are: `chat.agentHost.otel.*` is present in the shipped
-agent host. It is also documented as running the CLI runtime, which would mean
-the CLI's `http://` refusal applies to it — but that is an inference from a
-premise we have not verified, resting on a claim we have not reproduced. Both
-halves are below.
+and the agent host process"*. The agent host has **no settings namespace of its
+own** — an earlier claim that it did was wrong and is retracted in
+[04-surfaces.md](04-surfaces.md). What it has is a loopback OTLP receiver: it
+spawns the CLI as a stdio child, listens on `127.0.0.1`, and relays what the
+child sends. Its telemetry therefore follows the extension's configuration, and
+the `http://` on that hop is internal to one process tree.
 
-## The `http://` trap
+## The `http://` refusal, and what it is actually about
 
 > [!CAUTION]
-> **The Copilot CLI is reported to silently disable export to any `http://`
-> endpoint**, including `http://localhost:4318`. From `copilot help monitoring`:
-> export is dropped *"rather than sent in cleartext; startup is not aborted."*
-> There is no non-zero exit and the only signal is a process-log warning.
-> ([copilot-cli#4567][cli4567], open as of 2026-09-12, **reported against
-> v1.0.80**.)
+> **This section previously said the CLI "silently disables export to any
+> `http://` endpoint". That was a misreading and is corrected here.** It was
+> sourced from [copilot-cli#4567][cli4567] and from a `copilot help monitoring`
+> quote, and never reproduced.
 
-> [!WARNING]
-> **Unreproduced, and version-bounded.** The CLI runtime installed on this
-> machine is **v1.0.54**, which predates v1.0.80. In it:
->
-> - `cleartext` and `not aborted` appear **zero** times — in the CLI's own
->   bundle, in the VS Code-bundled CLI copy, and in the agent host;
-> - its activation function performs no protocol check whatsoever;
-> - its own `copilot help monitoring` text gives the **opposite** advice, listing
->   `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` as its first worked
->   example;
-> - its changelog has no entry mentioning the behaviour.
->
-> So either it landed between 1.0.54 and 1.0.80, or the claim needs re-sourcing.
-> `just copilot-smoke` reads whichever runtime you have and says which case you
-> are in — including refusing to conclude when it is looking at a file with no
-> OTel code in it.
->
-> Keep checking this when CLI data goes missing. Do not treat it as a property of
-> every build, and do not build infrastructure on it without reproducing it.
+There are **four** Copilot CLI runtimes reachable on a typical machine, and the
+newest is not where you would look first:
 
-**The VS Code extension exports to that same endpoint without complaint.** So a
-collector on `localhost:4318` receives extension data and nothing from the CLI,
-and the obvious conclusion — "the CLI has no telemetry" — is wrong.
+| Location | Version |
+|---|---|
+| `~/.copilot/pkg/<platform>/<version>/app.js` | 0.0.372, 0.0.396, **1.0.54** |
+| inside the extension, `node_modules/@github/copilot` | **1.0.73** |
 
-Use TLS in front of the collector. **Not the file exporter** — read the next
-section first.
+The 1.0.73 native runtime is where the cleartext logic lives, and it says:
+
+> *"Managed OTLP headers are configured but the managed telemetry endpoint '…'
+> is not https; refusing to transmit the (sensitive) managed headers over
+> cleartext."*
+>
+> *"Managed OTLP headers are configured but no managed telemetry endpoint is
+> set; refusing to stamp the (sensitive) managed headers onto an endpoint
+> resolved from the user-controlled `OTEL_EXPORTER_OTLP_ENDPOINT` / per-signal
+> env vars."*
+
+**What is refused is the credential, not the telemetry.** The CLI declines to
+put enterprise-managed headers on an endpoint that is either cleartext or
+user-controlled. Export itself proceeds. An individual developer with no managed
+telemetry sees no change at all, and 1.0.54's own help text still lists
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` as its first worked example.
+
+For an enterprise this still bites, just differently: telemetry arrives at the
+collector **without the auth headers**, which reads downstream as unauthenticated
+traffic rather than as missing data.
+
+The same runtime exposes the way out, which the old advice to "terminate TLS in
+front of the collector" never mentioned because it was not known:
+
+```
+OTEL_EXPORTER_OTLP_CERTIFICATE         # private CA for the collector
+OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE  # mTLS
+OTEL_EXPORTER_OTLP_CLIENT_KEY
+```
+
+plus per-signal `OTEL_EXPORTER_OTLP_{TRACES,METRICS}_*` variants. A private CA
+is deliverable to the CLI.
+
+> [!NOTE]
+> **No code path was found in any local runtime that drops export purely because
+> the scheme is `http`.** If CLI data is missing and you have no managed
+> telemetry, this is not your cause. `just copilot-smoke` reports what your
+> installed runtimes contain.
+
+**Do not use the file exporter as a workaround** — read the next section first.
 
 ## The file exporter writes `{}` for every span
 
@@ -163,6 +188,19 @@ Do not repeat this check by grepping for `safeStringify`: that name is also
 Ajv's code generator, which accounts for both of its occurrences in the bundle.
 Anchor on the `catch` returning `{}` beside the write-stream construction.
 
+## The three configuration traps live in the README
+
+Traps **9** (the endpoint variable is an on switch), **10** (a malformed
+endpoint silently reverts to `localhost:4318`) and **11** (the `protocol`
+setting cannot select grpc, while the identically-named environment variable
+can) are documented in full — with the resolver code they were read from — in
+the [README](../README.md#the-eleven-traps) rather than repeated here.
+
+They are all consequences of one function, `dqe()` in the shipped bundle, which
+resolves policy, environment and settings into the config the exporter uses.
+Read them together; individually each looks like an oddity, together they are a
+precedence chain.
+
 ## The SQLite span store
 
 `dbSpanExporter.enabled` writes to `agent-traces.db` in the extension's global
@@ -215,11 +253,13 @@ a `cached_tokens` column that is entirely NULL is the difference between having
 that data and only appearing to. It also compares the store's columns against
 the installed bundle's DDL, so the two cannot drift apart unnoticed.
 
-> [!NOTE]
-> Retention is reported as 7 days / 100 sessions, which would bound how far back
-> any replay can reach. That figure comes from the **archived v0.44.0 source and
-> has not been re-confirmed in 0.60.0** — the retention code was not located in
-> the shipped bundle.
+**Retention is 7 days**, confirmed in 0.60.0 rather than inferred: the store
+runs `DELETE FROM spans WHERE start_time_ms < ?` on open, with a window of
+`10080*60*1e3` — 10,080 minutes, exactly seven days — alongside a most-recent-100
+sessions bound. That is the hard ceiling on how far back any replay can reach.
+
+(An earlier revision of this section said the retention code "was not located in
+the shipped bundle". It is there; the search was inadequate.)
 
 ## VS Code settings
 
@@ -335,7 +375,7 @@ billing envelope at all.
 2026-09-12 — asks for parity with `claude_code.cost.usage`. Until then Copilot
 cost comes from the Usage Metrics API, not OTel.
 
-Compounding it, [copilot-cli#4224][cli4224] (open) reports that subagent spans
+Compounding it, [copilot-cli#4224][cli4224] (closed 2026-09-20, fixed in CLI v1.0.86) reported that subagent spans
 carry **no** `github.copilot.*` billing attributes and their spend is not folded
 into the root either — roughly **10–15% of session cost invisible**.
 

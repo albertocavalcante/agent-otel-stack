@@ -61,7 +61,7 @@ require_cmd() {
 # catch any contributor's machine, not one author's. They are also written so
 # this file does not match its own pattern — a character class cannot match
 # the literal '[' that starts it.
-export LEAK_PATTERN='/Volumes/[A-Za-z0-9_-]+/|/Users/[a-z]|/home/[a-z]|ghp_[A-Za-z0-9]{20}|gho_[A-Za-z0-9]{20}|github[_]pat[_]|sk[-]ant[-]|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+export LEAK_PATTERN='/Volumes/[A-Za-z0-9_-]+/|/Users/[A-Za-z]|/home/[A-Za-z]|ghp_[A-Za-z0-9]{20}|gho_[A-Za-z0-9]{20}|github[_]pat[_]|sk[-]ant[-]|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
 
 # md_files — every Markdown file the repo will ship, one per line.
 #

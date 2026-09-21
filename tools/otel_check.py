@@ -78,10 +78,20 @@ def check_durability(doc: dict) -> list[str]:
                 f"silently discards whatever is in flight"
             )
         else:
-            if not queue.get("storage"):
+            storage = queue.get("storage")
+            if not storage:
                 errors.append(
                     f"exporter `{name}`.sending_queue sets no `storage` — the queue is "
                     f"memory-only and does not survive a restart"
+                )
+            elif str(storage) not in storages:
+                # Truthy is not enough. A name that matches no defined extension
+                # fails at collector startup, which is exactly the class of error
+                # this gate exists to catch before the binary is available.
+                errors.append(
+                    f"exporter `{name}`.sending_queue names storage `{storage}`, "
+                    f"which is not a defined `file_storage` extension — the "
+                    f"collector will refuse to start"
                 )
             if queue.get("block_on_overflow") is not True:
                 errors.append(
@@ -134,8 +144,15 @@ def check(doc: dict) -> list[str]:
         for kind in ("receivers", "processors", "exporters"):
             used = spec.get(kind)
             if used is None:
-                if kind != "processors":
-                    errors.append(f"pipeline `{name}` declares no {kind}")
+                # A pipeline with no processors is legal in otelcol and fatal
+                # here: it has no memory_limiter and no redaction, so it would
+                # OOM and ship raw identifiers. Silence was the wrong default.
+                errors.append(
+                    f"pipeline `{name}` declares no {kind}"
+                    if kind != "processors"
+                    else f"pipeline `{name}` declares no processors — no memory_limiter "
+                    f"and no redaction, so it can OOM and will export raw identifiers"
+                )
                 continue
             if not isinstance(used, list):
                 errors.append(f"pipeline `{name}`.{kind} is not a list")

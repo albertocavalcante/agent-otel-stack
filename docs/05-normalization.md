@@ -70,7 +70,8 @@ querying Tempo directly with TraceQL.
 
 Claude Code metrics are counters. Sum them.
 
-Copilot spans are **not** summable across levels. `invoke_agent` is the root and
+Copilot spans are **not** summable across levels (canonical statement of this
+rule: [README trap 6](../README.md#6-nano_aiu-is-duplicated-onto-children)). `invoke_agent` is the root and
 its token counts already contain every child `chat` span. `github.copilot.nano_aiu`
 is worse — it is duplicated onto the children outright.
 
@@ -83,7 +84,7 @@ sum(gen_ai.usage.input_tokens) where span.name == "chat"
 ```
 
 And even the right version undercounts: subagent spans carry no billing envelope
-and are not folded into the root either ([copilot-cli#4224][cli4224], open),
+and are not folded into the root either ([copilot-cli#4224][cli4224], closed 2026-09-20, fixed in v1.0.86),
 losing roughly 10–15% of session spend.
 
 ## Cost cannot be normalised

@@ -11,7 +11,7 @@ telemetry producers**, and two of them are both called Copilot.
 | **Signals** | metrics, events, beta traces | traces + metrics | traces + metrics |
 | **Cost metric** | ✅ `claude_code.cost.usage` | ❌ | ❌ |
 | **Billing attrs on spans** | n/a | ❌ **none at all** | ✅ `nano_aiu`, `cost` |
-| **Exports to `http://`** | ✅ | ✅ | ❌ **refuses on v1.0.80+** — unreproduced |
+| **Exports to `http://`** | ✅ | ✅ | ✅ — but **will not attach managed headers** to it |
 | **Exporter selection** | `OTEL_{METRICS,LOGS,TRACES}_EXPORTER` | `exporterType`: otlp-http, otlp-grpc, console, file | `COPILOT_OTEL_EXPORTER_TYPE`: otlp-http, file — **no grpc** |
 | **Default exporter** | unset — off | `otlp-http` | `otlp-http` |
 | **Wire protocol** | `OTEL_EXPORTER_OTLP_PROTOCOL` — **none, throws** | `http/json` by default; the `protocol` setting cannot select grpc | `http/json`; `http/protobuf` needs v1.0.61+ |
@@ -36,11 +36,11 @@ whether spans carry billing data at all.
 
 ### 2. Assuming one collector endpoint serves both
 
-`http://localhost:4318` works for VS Code and is reported to be **silently
-dropped** by the CLI ([copilot-cli#4567][cli4567], open, against v1.0.80). You
-get extension data, no CLI data, and no error — *if* your CLI is new enough. The
-claim is unreproduced and version-bounded; `just copilot-smoke` reads the
-runtime you have. See [02-copilot.md](02-copilot.md).
+`http://localhost:4318` works for both. What the CLI will not do is attach
+**enterprise managed headers** to a cleartext or user-controlled endpoint
+([copilot-cli#4567][cli4567], open). For an individual developer with no managed
+telemetry that changes nothing; for an enterprise it means the credentials are
+silently withheld. See [02-copilot.md](02-copilot.md).
 
 ### 3. Writing one dashboard
 
@@ -63,26 +63,34 @@ explicit that managed telemetry *"applies to both the Copilot Chat extension and
 the agent host process"* — which is only worth saying if they are separately
 configurable. They are.
 
-A separate `chat.agentHost.otel.*` namespace is **confirmed present** in the
-shipped agent host of VS Code 1.132.0, alongside the eleven
-`github.copilot.chat.otel.*` keys documented in
-[02-copilot.md](02-copilot.md). Verified 2026-09-21 by reading the build, not
-the settings documentation, which still lists only the extension's keys.
+> [!CAUTION]
+> **A previous revision of this file claimed a `chat.agentHost.otel.*` settings
+> namespace is "confirmed present". That was wrong and is retracted.** The
+> string occurs **zero** times in `agentHostMain.js`, in the extension bundle,
+> and in `package.json`. The claim came from a grep for `agentHost.otel` that
+> matched log tags — `[agentHost-otel] receiver: …` — and a DI service brand,
+> `agentHostOTelService`. Neither is a setting.
+>
+> There is **no separate settings namespace for the agent host.** The eleven
+> `github.copilot.chat.otel.*` keys are the whole user-facing surface.
 
-> [!NOTE]
-> **Still unverified: whether those are user settings or policy-only keys.** The
-> occurrences sit beside policy-resolution code, which would be consistent with
-> either. Do not assume you can set them in settings.json.
+What the agent host *does* have, read from the same build, is its own
+**in-process OTLP receiver on loopback**:
 
-Either way, the agent host is documented as running the **CLI runtime**, which is
-why the CLI's reported `http://` refusal is worth checking *inside VS Code* when
-extension spans arrive and agent turns do not.
+```js
+i.listen(0, "127.0.0.1", …)
+n.info(`[agentHost-otel] receiver listening on http://127.0.0.1:${port}`)
+```
 
-> [!NOTE]
-> That is an inference resting on two unverified claims: that the agent host
-> runs the CLI runtime (asserted by the vendor, not observed here) and that the
-> CLI refuses `http://` at all (see [02-copilot.md](02-copilot.md)). It is the
-> right first thing to check, not a conclusion to design around.
+It binds an ephemeral port, spawns the Copilot CLI as a stdio child pointed at
+it, and forwards what arrives onward. So the agent host is a *relay*, not a
+second independently-configured exporter — which is why it has no settings of
+its own, and why its telemetry follows the extension's configuration.
+
+That it spawns the CLI is observed, not inferred — `agentHostMain.js` contains
+`"[Copilot] Starting CopilotClient..."` and constructs the child over stdio. So
+the CLI's behaviour does reach you inside VS Code; it is the `http://` half of
+the old inference that was wrong, not this half.
 
 ## Where each one's cache data lives
 
@@ -111,8 +119,9 @@ turns)"*. And `nano_aiu` is duplicated onto the children outright.
 > [!IMPORTANT]
 > On Copilot, aggregate at **exactly one level**: `chat` for per-model, or
 > `invoke_agent` for per-turn. Never both. And note subagent spend is missing
-> from both ([copilot-cli#4224][cli4224], open), so `invoke_agent` alone
-> undercounts by roughly 10–15%.
+> from both ([copilot-cli#4224][cli4224], **closed 2026-09-20, fixed in CLI
+> v1.0.86**), so on older builds `invoke_agent` alone undercounts by roughly
+> 10–15%.
 
 ## Which is easier to instrument
 

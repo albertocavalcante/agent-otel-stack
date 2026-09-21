@@ -5,6 +5,7 @@ exists on any machine with VS Code — no seat and no sign-in required. That is
 what lets the copilot-check and copilot-smoke gates verify claims for free.
 """
 
+import json
 import os
 import re
 from pathlib import Path
@@ -112,23 +113,38 @@ def cli_runtime() -> tuple[Path, str] | None:
             raise OverrideMissing("COPILOT_CLI_DIR", override, CLI_ENTRYPOINT)
         return path, path.name
 
-    root = Path(CLI_ROOT).expanduser()
-    if not root.is_dir():
-        return None
+    found: list[tuple[tuple[int, ...], Path, str]] = []
 
-    found: list[tuple[tuple[int, ...], Path]] = []
-    for platform in sorted(root.iterdir()):
-        if not platform.is_dir():
-            continue
-        for version in sorted(platform.iterdir()):
-            if (version / CLI_ENTRYPOINT).is_file():
-                found.append((version_key(version.name), version))
+    root = Path(CLI_ROOT).expanduser()
+    if root.is_dir():
+        for platform in sorted(root.iterdir()):
+            if not platform.is_dir():
+                continue
+            for version in sorted(platform.iterdir()):
+                if (version / CLI_ENTRYPOINT).is_file():
+                    found.append((version_key(version.name), version, version.name))
+
+    # A fourth runtime ships INSIDE the extension, and on this machine it is
+    # newer than anything under ~/.copilot/pkg. Missing it is how a review of
+    # trap 2 concluded "no refusal logic exists anywhere" while the refusal was
+    # sitting in the extension's own node_modules.
+    extension = ext_dir()
+    if extension is not None:
+        bundled = extension / "node_modules" / "@github" / "copilot"
+        manifest = bundled / MANIFEST
+        if manifest.is_file():
+            try:
+                version = json.loads(manifest.read_text(encoding="utf-8")).get("version")
+            except (OSError, ValueError):
+                version = None
+            if version:
+                found.append((version_key(version), bundled, version))
 
     if not found:
         return None
 
-    newest = max(found)[1]
-    return newest, newest.name
+    newest = max(found)
+    return newest[1], newest[2]
 
 
 def traces_db() -> Path | None:
@@ -155,7 +171,11 @@ def traces_db() -> Path | None:
 # The vendor's own DDL is the expected value. Reading it at run time rather
 # than transcribing it is what stops this repository's description of the
 # schema drifting away from the product that writes it.
-_SPANS_DDL = re.compile(r"CREATE TABLE IF NOT EXISTS spans \(([^)]*)\)", re.DOTALL)
+# Balanced to the matching paren rather than the first one. A column with a
+# computed default — `DEFAULT (strftime('%s','now'))`, an ordinary SQL pattern —
+# would otherwise truncate the column list silently, leaving the drift check
+# blind to everything after it in both directions.
+_SPANS_DDL_START = re.compile(r"CREATE TABLE IF NOT EXISTS spans \(")
 
 
 def expected_spans_columns(ext_dir: Path) -> set[str] | None:
@@ -168,15 +188,45 @@ def expected_spans_columns(ext_dir: Path) -> set[str] | None:
     if not bundle.is_file():
         return None
 
-    found = _SPANS_DDL.search(bundle.read_text(encoding="utf-8", errors="replace"))
+    source = bundle.read_text(encoding="utf-8", errors="replace")
+    found = _SPANS_DDL_START.search(source)
     if not found:
         return None
 
+    depth, body = 1, []
+    for char in source[found.end() :]:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                break
+        body.append(char)
+    else:
+        return None  # unbalanced — cannot compare rather than compare wrongly
+
+    text = "".join(body).replace("\\n", "\n").replace("\\t", " ")
+
+    # Split on TOP-LEVEL commas only. The real DDL puts several columns on one
+    # line, so splitting by line is wrong; splitting on every comma would break
+    # a nested expression apart.
+    parts, depth, current = [], 0, []
+    for char in text:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    parts.append("".join(current))
+
     columns = set()
-    for line in found.group(1).replace("\\n", "\n").replace("\\t", " ").splitlines():
-        for part in line.split(","):
-            name = part.strip().split(" ")[0].strip()
-            if name and name.isidentifier():
-                columns.add(name)
+    for part in parts:
+        name = part.strip().split(" ")[0].strip()
+        if name and name.isidentifier():
+            columns.add(name)
 
     return columns or None

@@ -6,8 +6,8 @@ Run by `just copilot-check`.
 Every other gate in this repo checks structure: links resolve, paths exist, YAML
 binds to a datasource. None of them checks whether a documented CLAIM is true,
 and on 2026-09-21 three were not. The settings table listed five of eleven keys.
-The headers setting was documented as not existing. An agent-host namespace was
-marked unconfirmed. All three were readable on disk the whole time, because
+The headers setting was documented as not existing. Both were readable on disk
+the whole time, because
 Copilot ships built into VS Code rather than as a marketplace extension — so a
 gate can simply look.
 
@@ -107,7 +107,9 @@ def documented_settings() -> tuple[dict, str | None]:
 
 def configured_settings() -> set[str]:
     """Keys appearing in the env file's settings.json snippet."""
-    pattern = re.compile(r'"' + re.escape(PREFIX) + r'([A-Za-z.]+)"\s*:')
+    # [A-Za-z.]+ could not match a digit or underscore, so a stale key named
+    # `retiredSetting2` was invisible to the very stale-key check below.
+    pattern = re.compile(r'"' + re.escape(PREFIX) + r'([A-Za-z0-9._]+)"\s*:')
     text = Path(ENV).read_text(encoding="utf-8")
     return set(pattern.findall(text))
 
@@ -184,7 +186,7 @@ def main() -> int:
         report.warn(
             GATE, "no VS Code Copilot build found — set COPILOT_EXT_DIR to check against one"
         )
-        report.ok(GATE, "skipped: nothing installed to compare the docs against")
+        report.ok(GATE, "SKIPPED — no VS Code here, so no documented setting was verified")
         return 0
 
     real, version = real_settings(ext_dir / copilot.MANIFEST)

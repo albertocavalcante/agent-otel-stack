@@ -1,7 +1,7 @@
 # Claude Code
 
 Verified **2026-09-12** against the v2.1.220 binary and
-[`monitoring-usage`][mon]. Current release is **2.1.269** — where a claim is
+[`monitoring-usage`][mon]. Latest release seen was **2.1.278** (checked 2026-09-21) — where a claim is
 version-bound it says so.
 
 Config lives in [`../otel/env/claude-code.env`](../otel/env/claude-code.env).
@@ -36,7 +36,7 @@ the generic value; **headers merge** with it.
 hooks, MCP servers, LSPs. An instrumented app you launch from Claude Code will
 not pick up your collector endpoint.
 
-## The eight metrics
+## The metrics
 
 That is the complete list. Anything else you have read about is a span (below) or
 does not exist.
@@ -64,14 +64,14 @@ from being unbounded labels.
 
 ## Events
 
-Nine are documented. `claude_code.api_request` is **the only one carrying both
+The vendor documents 26 event types as of 2026-09-21 (this repo listed nine, which was the 2026-09-12 count). `claude_code.api_request` is **the only one carrying both
 token counts and cost**.
 
 | Event | Tokens | Cost | Content, and its gate |
 |---|:--:|:--:|---|
 | `user_prompt` | | | `prompt` — `OTEL_LOG_USER_PROMPTS` |
 | `assistant_response` | | | `response` — `OTEL_LOG_ASSISTANT_RESPONSES` |
-| `tool_result` | | | `tool_input` — `OTEL_LOG_TOOL_DETAILS` |
+| `tool_result` | | | `tool_parameters` — `OTEL_LOG_TOOL_DETAILS` |
 | `tool_decision` | | | `tool_input` — `OTEL_LOG_TOOL_DETAILS` |
 | **`api_request`** | ✅ | ✅ | — |
 | `api_error` | | | error message |

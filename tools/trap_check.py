@@ -47,7 +47,10 @@ def anchor_for(heading: str) -> str:
     text = heading.lower()
     text = text.replace("`", "")
     text = re.sub(r"[^\w\s-]", "", text)  # drops . : / etc, keeps _ via \w
-    text = re.sub(r"\s+", "-", text.strip())
+    # GitHub replaces each space with one hyphen. Collapsing runs of
+    # whitespace would call a double-space heading's "a--b" anchor "a-b"
+    # and certify a dead link.
+    text = text.strip().replace(" ", "-")
     return text
 
 
