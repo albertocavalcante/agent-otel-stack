@@ -247,6 +247,7 @@ first. `just smoke` prints your version.
 | `tools/smoke.sh` | `just smoke` — verifies Claude Code's surface on your build |
 | `tools/copilot_smoke.py` | `just copilot-smoke` — verifies Copilot's surface **with no seat** |
 | `tools/copilot_check.py` | Fails if a documented Copilot setting's **name, type or default** has drifted |
+| `tools/copilot_traces.py` | `just copilot-traces` — what is in the local SQLite span store |
 | `tools/otel_check.py` | Validates the collector config **without the collector binary** |
 | `tools/dash-check.sh` | Rejects dashboards that won't bind to a provisioned datasource |
 | `tools/paths.py` | Fails if a comment points at a repo file that does not exist |

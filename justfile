@@ -58,6 +58,10 @@ smoke prompt='reply with exactly: ok':
 copilot-smoke dump='':
     @./tools/copilot_smoke.py {{ quote(dump) }}
 
+# Report what is in Copilot's local SQLite span store. Read-only, never writes.
+copilot-traces:
+    @./tools/copilot_traces.py
+
 # Word count and link count per document
 stats:
     #!/usr/bin/env bash

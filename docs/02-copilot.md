@@ -163,6 +163,64 @@ Do not repeat this check by grepping for `safeStringify`: that name is also
 Ajv's code generator, which accounts for both of its occurrences in the bundle.
 Anchor on the `catch` returning `{}` beside the write-stream construction.
 
+## The SQLite span store
+
+`dbSpanExporter.enabled` writes to `agent-traces.db` in the extension's global
+storage. It is the only durable local copy of a span when the collector was not
+running, which makes it the obvious thing to replay from — so it is worth being
+precise about what it does and does not hold.
+
+Schema, read out of the shipped 0.60.0 bundle's own DDL rather than transcribed:
+
+```sql
+spans(span_id PK, trace_id, parent_span_id, name,
+      start_time_ms INTEGER, end_time_ms INTEGER,
+      status_code, status_message, operation_name, provider_name, agent_name,
+      conversation_id, request_model, response_model,
+      input_tokens, output_tokens, cached_tokens, reasoning_tokens,
+      tool_name, tool_call_id, tool_type, chat_session_id, turn_index, ttft_ms REAL)
+span_attributes(span_id FK, key, value TEXT, PK(span_id, key))
+span_events(id PK, span_id FK, name, timestamp_ms, attributes TEXT)
+schema_version(version INTEGER PRIMARY KEY)
+CREATE VIEW sessions AS …  -- derived from spans; there is no sessions table
+```
+
+**`cached_tokens` is a column here**, which matters: cache-hit rate is otherwise
+traces-only ([#317837][vs317837]), and this is the one place it is queryable
+with SQL.
+
+> [!IMPORTANT]
+> **The store is lossy relative to OTLP.** "Replay the spans" conceals four
+> things it cannot give back:
+>
+> | Loss | Consequence |
+> |---|---|
+> | Times are **milliseconds** | OTLP is nanoseconds. Sub-millisecond detail is gone |
+> | **No resource** | `service.name` and every resource attribute must be synthesised |
+> | **No instrumentation scope** | A replayed span cannot say which library emitted it |
+> | `span_attributes.value` is **TEXT** | Ints, bools and arrays come back as strings |
+>
+> A replay therefore **reconstructs** spans; it does not restore them. For cost
+> and token work that is fine. It is not fine to let the result look like
+> observed data.
+
+**Anything replayed from here must be marked** — `agent_otel.backfilled=true`,
+the source database, and the replay time — so a dashboard can segment or exclude
+it. Deciding that now is deliberate: the alternative is discovering after a
+month of mixed data that no query can separate reconstruction from observation.
+
+`just copilot-traces` reads the store read-only and reports schema version, span
+count, date range, operations, and **which columns are actually populated** —
+a `cached_tokens` column that is entirely NULL is the difference between having
+that data and only appearing to. It also compares the store's columns against
+the installed bundle's DDL, so the two cannot drift apart unnoticed.
+
+> [!NOTE]
+> Retention is reported as 7 days / 100 sessions, which would bound how far back
+> any replay can reach. That figure comes from the **archived v0.44.0 source and
+> has not been re-confirmed in 0.60.0** — the retention code was not located in
+> the shipped bundle.
+
 ## VS Code settings
 
 All eleven keys, prefix `github.copilot.chat.otel.`, every one tagged `advanced`.

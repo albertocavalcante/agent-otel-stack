@@ -15,6 +15,7 @@ telemetry producers**, and two of them are both called Copilot.
 | **Exporter selection** | `OTEL_{METRICS,LOGS,TRACES}_EXPORTER` | `exporterType`: otlp-http, otlp-grpc, console, file | `COPILOT_OTEL_EXPORTER_TYPE`: otlp-http, file — **no grpc** |
 | **Default exporter** | unset — off | `otlp-http` | `otlp-http` |
 | **Wire protocol** | `OTEL_EXPORTER_OTLP_PROTOCOL` — **none, throws** | `http/json` by default; the `protocol` setting cannot select grpc | `http/json`; `http/protobuf` needs v1.0.61+ |
+| **Recoverable after the fact** | ❌ nothing local | ✅ `agent-traces.db` — spans only, **lossy**, `just copilot-traces` | ❌ file exporter output only, format unverified |
 
 > [!NOTE]
 > The middle two rows are not the same question. `otlp-http` and `file` are

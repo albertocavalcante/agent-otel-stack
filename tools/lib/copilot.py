@@ -6,6 +6,7 @@ what lets the copilot-check and copilot-smoke gates verify claims for free.
 """
 
 import os
+import re
 from pathlib import Path
 
 # Basename only, deliberately. A string holding a slash followed by a scanned
@@ -30,6 +31,19 @@ _CANDIDATES = (
 # literal home path, and rightly so.
 CLI_ROOT = "~/.copilot/pkg"
 CLI_ENTRYPOINT = "app.js"
+
+# The SQLite span store `otel.dbSpanExporter.enabled` writes. Tilde unexpanded
+# for the same reason as CLI_ROOT.
+TRACES_DB = "agent-traces.db"
+_GLOBAL_STORAGE = (
+    "~/Library/Application Support/Code/User/globalStorage/github.copilot-chat",
+    "~/Library/Application Support/Code - Insiders/User/globalStorage/github.copilot-chat",
+    "~/.config/Code/User/globalStorage/github.copilot-chat",
+    "~/.config/Code - Insiders/User/globalStorage/github.copilot-chat",
+)
+
+# The extension's own bundled exporter code, relative to the extension dir.
+BUNDLE = ("dist", "extension.js")
 
 
 class OverrideMissing(Exception):
@@ -115,3 +129,54 @@ def cli_runtime() -> tuple[Path, str] | None:
 
     newest = max(found)[1]
     return newest, newest.name
+
+
+def traces_db() -> Path | None:
+    """The SQLite span store, or None when dbSpanExporter has never run.
+
+    COPILOT_TRACES_DB overrides discovery, and when set it is the ONLY
+    candidate.
+    """
+    override = os.environ.get("COPILOT_TRACES_DB")
+    if override:
+        path = Path(override)
+        if not path.is_file():
+            raise OverrideMissing("COPILOT_TRACES_DB", override, TRACES_DB)
+        return path
+
+    for candidate in _GLOBAL_STORAGE:
+        path = Path(candidate).expanduser() / TRACES_DB
+        if path.is_file():
+            return path
+
+    return None
+
+
+# The vendor's own DDL is the expected value. Reading it at run time rather
+# than transcribing it is what stops this repository's description of the
+# schema drifting away from the product that writes it.
+_SPANS_DDL = re.compile(r"CREATE TABLE IF NOT EXISTS spans \(([^)]*)\)", re.DOTALL)
+
+
+def expected_spans_columns(ext_dir: Path) -> set[str] | None:
+    """Column names the installed bundle's `spans` DDL declares, or None.
+
+    None means the DDL was not found where expected — the caller must treat
+    that as "cannot compare", never as "no drift".
+    """
+    bundle = ext_dir.joinpath(*BUNDLE)
+    if not bundle.is_file():
+        return None
+
+    found = _SPANS_DDL.search(bundle.read_text(encoding="utf-8", errors="replace"))
+    if not found:
+        return None
+
+    columns = set()
+    for line in found.group(1).replace("\\n", "\n").replace("\\t", " ").splitlines():
+        for part in line.split(","):
+            name = part.strip().split(" ")[0].strip()
+            if name and name.isidentifier():
+                columns.add(name)
+
+    return columns or None
