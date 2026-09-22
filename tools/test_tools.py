@@ -218,6 +218,53 @@ def test_dash_check() -> None:
 
         with_inputs = dict(sound, __inputs=[{"name": "DS_PROMETHEUS"}])
         check("  catches __inputs", run(with_inputs) != 0, True)
+
+        # The failure-counter guard. Measured against a running stack: three of
+        # six Pipeline Health panels rendered "No Data" while everything was
+        # healthy, because the SDK creates no series for a counter that has
+        # never incremented.
+        def with_expr(expr):
+            doc = json.loads(json.dumps(sound))
+            doc["panels"][0]["targets"][0]["expr"] = expr
+            return run(doc)
+
+        guard_cases = [
+            (
+                "guarded failure counter passes",
+                "sum(rate(otelcol_exporter_send_failed_spans[5m])) or on() vector(0)",
+                False,
+            ),
+            (
+                "catches an unguarded failure counter",
+                "sum(rate(otelcol_exporter_send_failed_spans[5m]))",
+                True,
+            ),
+            # `on()` omitted: vector(0) is ADDED beside the real series rather
+            # than replacing the empty one — 3 series where 2 belong.
+            (
+                "catches a guard missing on()",
+                "sum(rate(otelcol_exporter_send_failed_spans[5m])) or vector(0)",
+                True,
+            ),
+            # A `+` chain with one empty operand evaluates to empty, so a
+            # partially-guarded sum still blanks the panel.
+            (
+                "catches 2 failure metrics with only 1 guard",
+                "sum(increase(otelcol_exporter_enqueue_failed_spans[1h]) or on() vector(0))"
+                " + sum(increase(otelcol_exporter_enqueue_failed_log_records[1h]))",
+                True,
+            ),
+            # Negative control: the rule must not demand a guard on a counter
+            # that always exists, or it would be satisfied by guarding
+            # everything and would stop meaning anything.
+            (
+                "leaves a non-failure metric alone",
+                "sum(rate(otelcol_receiver_accepted_spans[5m]))",
+                False,
+            ),
+        ]
+        for label, expr, want_fail in guard_cases:
+            check(f"  {label}", with_expr(expr) != 0, want_fail)
     finally:
         target.unlink(missing_ok=True)
 

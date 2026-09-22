@@ -103,6 +103,35 @@ for f in "${dashboards[@]}"; do
     fails=1
   fi
 
+  # 4. Every failure counter must be guarded with `or on() vector(0)`.
+  #
+  #    The OTel SDK does not create a counter series until it first increments,
+  #    so on a HEALTHY stack `otelcol_exporter_send_failed_spans` does not exist
+  #    and its panel renders "No Data" — indistinguishable from a broken query.
+  #    Three of six panels here did exactly that, measured against a running
+  #    stack.
+  #
+  #    The `+` chains are the sharp end. A binary operation with an empty
+  #    operand evaluates to empty, so "Dropped before the queue" went blank
+  #    whenever ANY ONE of its three signals had never failed — a real span drop
+  #    hidden by the panel whose job is to show drops. Hence guards are counted,
+  #    not merely detected: one guard on a three-term sum is still broken.
+  #
+  #    `on()` is load-bearing. Without it the match is on the full label set, so
+  #    vector(0) does not match a labelled series and gets ADDED alongside the
+  #    real ones — 3 series where 2 belong. Measured both ways.
+  unguarded=$(jq -r '[ .. | objects | select(has("expr")) | .expr
+    | select(type == "string")
+    | select(test("_(failed|refused)_"))
+    | select(
+        (([splits("or on\\(\\) vector\\(0\\)")] | length) - 1)
+        < (([splits("otelcol_[a-z_]*_(failed|refused)_")] | length) - 1)
+      ) ] | length' "$f")
+  if [ "$unguarded" -gt 0 ]; then
+    fail dash-check "$f has $unguarded failure-counter expr(s) with fewer \`or on() vector(0)\` guards than failure metrics — they render No Data instead of 0"
+    fails=1
+  fi
+
   mapfile -t used < <(jq -r '[.. | objects | select(has("datasource")) | .datasource
     | select(type == "object") | .uid | select(. != null)] | unique[]' "$f")
   for uid in "${used[@]}"; do

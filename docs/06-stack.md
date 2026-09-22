@@ -79,6 +79,28 @@ Also note that failure counters do not appear until they are non-zero:
 `otelcol_exporter_send_failed_spans` is absent on a healthy stack, so "no such
 metric" and "no failures" look the same from a query.
 
+That hazard was written here for days before anything acted on it. Measured
+against a running stack, **three of the six Pipeline Health panels rendered "No
+Data" while the pipeline was working perfectly** — Dropped before the queue,
+Export failures by signal, and Memory limiter refusals. A blank panel reads as
+"broken query", so the healthy state was indistinguishable from a broken
+dashboard.
+
+The `+` chain was worse than cosmetic. In PromQL a binary operation with an
+empty operand evaluates to *empty*, so "Dropped before the queue" —
+`sum(spans) + sum(log_records) + sum(metric_points)` — went blank whenever any
+one of the three had never failed. A real span drop would have been hidden by
+the panel whose only job is to show drops.
+
+Every failure-counter expression is now guarded with `or on() vector(0)`, and
+each term of a sum is guarded separately. `just dash-check` counts guards
+against failure metrics and fails when a sum is only partly covered, because one
+guard on a three-term chain still blanks.
+
+`on()` is load-bearing and was measured both ways. Without it the match is on
+the full label set, so `vector(0)` does not match a labelled series and is
+*added* beside the real ones — three series where two belong.
+
 ## Two traps this stack itself can fall into
 
 **Prometheus needs `--web.enable-otlp-receiver`.** Without it the gateway's POST

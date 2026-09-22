@@ -80,7 +80,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
-          "expr": "sum(increase(otelcol_exporter_enqueue_failed_spans[1h])) + sum(increase(otelcol_exporter_enqueue_failed_log_records[1h])) + sum(increase(otelcol_exporter_enqueue_failed_metric_points[1h]))",
+          "expr": "(sum(increase(otelcol_exporter_enqueue_failed_spans[1h])) or on() vector(0)) + (sum(increase(otelcol_exporter_enqueue_failed_log_records[1h])) or on() vector(0)) + (sum(increase(otelcol_exporter_enqueue_failed_metric_points[1h])) or on() vector(0))",
           "legendFormat": "dropped 1h"
         }
       ],
@@ -108,19 +108,19 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
-          "expr": "sum by (collector_role) (rate(otelcol_exporter_send_failed_spans[5m]))",
+          "expr": "sum by (collector_role) (rate(otelcol_exporter_send_failed_spans[5m])) or on() vector(0)",
           "legendFormat": "{{collector_role}} spans"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
-          "expr": "sum by (collector_role) (rate(otelcol_exporter_send_failed_log_records[5m]))",
+          "expr": "sum by (collector_role) (rate(otelcol_exporter_send_failed_log_records[5m])) or on() vector(0)",
           "legendFormat": "{{collector_role}} logs"
         },
         {
           "refId": "C",
           "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
-          "expr": "sum by (collector_role) (rate(otelcol_exporter_send_failed_metric_points[5m]))",
+          "expr": "sum by (collector_role) (rate(otelcol_exporter_send_failed_metric_points[5m])) or on() vector(0)",
           "legendFormat": "{{collector_role}} metrics"
         }
       ],
@@ -147,7 +147,7 @@
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
-          "expr": "sum by (collector_role) (rate(otelcol_receiver_refused_spans[5m]))",
+          "expr": "sum by (collector_role) (rate(otelcol_receiver_refused_spans[5m])) or on() vector(0)",
           "legendFormat": "{{collector_role}} refused"
         }
       ],
@@ -168,13 +168,13 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
-          "expr": "sum by (collector_role) (rate(otelcol_processor_memory_limiter_refused_spans[5m]))",
+          "expr": "sum by (collector_role) (rate(otelcol_processor_memory_limiter_refused_spans[5m])) or on() vector(0)",
           "legendFormat": "{{collector_role}} spans refused"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
-          "expr": "sum by (collector_role) (rate(otelcol_processor_memory_limiter_refused_log_records[5m]))",
+          "expr": "sum by (collector_role) (rate(otelcol_processor_memory_limiter_refused_log_records[5m])) or on() vector(0)",
           "legendFormat": "{{collector_role}} logs refused"
         }
       ],
