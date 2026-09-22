@@ -222,6 +222,54 @@ def test_dash_check() -> None:
         target.unlink(missing_ok=True)
 
 
+# --------------------------------------------------------------------------
+# settings_render.parse — the env file has four line shapes and one trap.
+# --------------------------------------------------------------------------
+def test_settings_render() -> None:
+    print("settings_render.parse")
+    import settings_render
+
+    live, optional, unparsed = settings_render.parse(
+        "\n".join(
+            [
+                "# a plain comment",
+                "",
+                "CLAUDE_CODE_ENABLE_TELEMETRY=1",
+                "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317",
+                "# OTEL_TRACES_EXPORTER=otlp",
+                # PROSE about a setting, not the setting. Rendering this as a
+                # value would enable prompt export in anyone who asked for the
+                # optional block.
+                "# OTEL_LOG_USER_PROMPTS=1 exports prompt text.",
+                "export FOO=1",
+                'BAR="a b"',
+                "BAZ=1 # trailing comment",
+                "lower=1",
+            ]
+        )
+    )
+    check(
+        "  live assignments",
+        live,
+        {
+            "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+            "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4317",
+        },
+    )
+    check("  commented assignment -> optional", optional, {"OTEL_TRACES_EXPORTER": "otlp"})
+    check("  prose about a setting is NOT a setting", "OTEL_LOG_USER_PROMPTS" in optional, False)
+    check("  refuses export/quoted/trailing/lowercase", len(unparsed), 4)
+
+    # Against the real file: the two settings that export conversation content
+    # must never be renderable, and nothing may be silently skipped.
+    real = (TOOLS.parent / "otel" / "env" / "claude-code.env").read_text()
+    live, optional, unparsed = settings_render.parse(real)
+    check("  the real file parses completely", unparsed, [])
+    for danger in ("OTEL_LOG_USER_PROMPTS", "OTEL_LOG_RAW_API_BODIES"):
+        check(f"  {danger} is unrenderable", danger in live or danger in optional, False)
+    check("  the real file yields settings", len(live) > 5, True)
+
+
 def main() -> int:
     for test in (
         test_anchor_for,
@@ -230,6 +278,7 @@ def main() -> int:
         test_interpreter_gate,
         test_check_durability,
         test_dash_check,
+        test_settings_render,
     ):
         test()
 

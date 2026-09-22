@@ -36,6 +36,11 @@ dash-check:
 # Depends on local machine state, so — like `pins` — deliberately NOT in `check`:
 # on a machine without VS Code it can only warn and pass, and a gate that
 # reports ✓ having verified nothing is this repo's own subject matter.
+#
+# `just` takes the LAST comment line as a recipe's description, so every recipe
+# whose comment runs to a second line needs [doc] or `just --list` prints a
+# sentence fragment. Three of them did.
+[doc("Fail if a documented Copilot setting has drifted from the installed VS Code")]
 copilot-check:
     @./tools/copilot_check.py
 
@@ -55,13 +60,22 @@ fmt:
 fmt-check:
     @./tools/fmt.sh --check
 
+# Render otel/env/claude-code.env as a settings.json `env` block, for pasting
+# into ~/.claude/settings.json. Prints; never writes. `--include-optional` adds
+# the settings that file deliberately ships off.
+[doc("Render claude-code.env as a settings.json `env` block. Prints, never writes")]
+settings *args:
+    @./tools/settings_render.py {{ args }}
+
 # Verify Claude Code's telemetry surface on THIS machine — console exporter,
 # no collector and no container. Makes two billed calls.
+[doc("Verify Claude Code's telemetry surface on THIS machine. Makes two billed calls")]
 smoke prompt='reply with exactly: ok':
     @./tools/smoke.sh {{ quote(prompt) }}
 
 # Verify Copilot's telemetry surface on THIS machine — no seat, no API calls.
 # Pass a dump the file exporter produced to report what it actually contains.
+[doc("Verify Copilot's telemetry surface on THIS machine — no seat, no API calls")]
 copilot-smoke dump='':
     @./tools/copilot_smoke.py {{ quote(dump) }}
 
@@ -71,6 +85,7 @@ copilot-traces:
 
 # Fail if a compose image digest is not its tag's manifest list. Needs network,
 # so deliberately NOT in `check`.
+[doc("Fail if a compose image digest is not its tag's manifest list. Needs network")]
 pins:
     @./tools/pins_check.py
 

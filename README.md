@@ -14,11 +14,17 @@ re-verify every claim below against the build on your machine.
 just stack-init   # local dev token in a gitignored .env
 just up           # agent + gateway + prometheus + loki + tempo + grafana
 just stack-check  # posts one span, proves it reaches Tempo
+just settings     # the env block to paste into ~/.claude/settings.json
 ```
 
 Grafana on `http://127.0.0.1:3000`, with Pipeline Health and Claude Code cost
-dashboards provisioned. Point a harness at `http://127.0.0.1:4318` using
-[`otel/env/`](otel/env/).
+dashboards provisioned.
+
+`stack-check` proves the pipe, not your data. Paste what `just settings` prints
+into `~/.claude/settings.json`, start a new session, and the cost dashboard fills
+in as you work — metrics land within `OTEL_METRIC_EXPORT_INTERVAL`, ten seconds.
+For Copilot, whose settings are not environment variables at all, the keys are in
+[`otel/env/copilot-vscode.env`](otel/env/copilot-vscode.env) ready to paste.
 
 Two checks need no stack and no collector at all — `just smoke` reports what
 Claude Code emits on your build (two billed calls), and `just copilot-smoke`
