@@ -8,6 +8,11 @@
 # gates that depend on the outside world are excluded by design and run on
 # demand: `just pins` needs a registry, `just copilot-check` needs a local
 # VS Code install.
+#
+# Tool installs use each project's own documented method rather than
+# `releases/latest/download/<name>.tar.gz`, which 404s for any project whose
+# asset filenames carry the version — as just's do. The first version of this
+# file made exactly that mistake and failed on its first run.
 
 name: check
 
@@ -26,29 +31,33 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install just, shellcheck, shfmt
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck
-          curl -fsSL https://github.com/casey/just/releases/latest/download/just-x86_64-unknown-linux-musl.tar.gz \
-            | sudo tar xz -C /usr/local/bin just
-          curl -fsSL -o /usr/local/bin/shfmt \
-            https://github.com/mvdan/sh/releases/latest/download/shfmt_v3.12.0_linux_amd64
-          sudo chmod +x /usr/local/bin/shfmt
-
-      - uses: astral-sh/ruff-action@v3
-        with:
-          args: --version
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
-      - name: PyYAML for otel-check
-        run: pip install --quiet pyyaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Install just
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+            | bash -s -- --to /usr/local/bin
+
+      - name: Install shfmt
+        run: go install mvdan.cc/sh/v3/cmd/shfmt@v3.12.0
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y -qq shellcheck
+
+      - name: Install ruff and PyYAML
+        run: pip install --quiet ruff pyyaml
+
+      - name: Versions
+        run: just --version && shfmt --version && shellcheck --version && ruff --version
 
       - name: just check
         run: just check
 
-      - name: Tool self-tests
+      - name: just test
         run: just test
