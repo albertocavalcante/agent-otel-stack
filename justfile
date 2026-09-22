@@ -76,7 +76,7 @@ down *args:
 
 # Post one span to the agent and prove it reaches Tempo
 stack-check:
-    @./tools/stack.sh check
+    @./tools/stack_probe.py
 
 # Follow stack logs. `just logs collector-gateway` for one service.
 logs *args:

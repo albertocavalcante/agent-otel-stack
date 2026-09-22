@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# tools/stack.sh — bring the local stack up, prove it works, tear it down.
-# Run by `just stack-init`, `just up`, `just down`, `just stack-check`,
-# `just logs`.
+# tools/stack.sh — bring the local stack up, tear it down, follow its logs.
+# Run by `just stack-init`, `just up`, `just down`, `just logs`.
 #
-# The load-bearing part is `check`. A stack that starts is not a stack that
-# works: every service can report healthy while a span posted at one end never
-# reaches the other, because the failures this repository documents are all
-# silent. So `check` posts a real span to the agent and then asks Tempo for it
-# by trace ID. That round trip is the only claim worth making.
+# Orchestration only: process lifecycle and health polling, which is what shell
+# is for. The end-to-end assertion is `just stack-check`, and it lives in
+# tools/stack_probe.py because it is JSON construction and parsing — see
+# `just lint`, which fails if an interpreter is ever embedded in a shell script
+# again.
 #
 # `up` refuses to report success before the stack is actually serving. A `just
 # up` that returns 0 while nothing works would be this repo's own thesis,
@@ -95,88 +94,6 @@ cmd_logs() {
   compose logs -f "$@"
 }
 
-# The honest end-to-end assertion: one span in at the agent, the same span out
-# of Tempo. Anything less proves only that processes started.
-cmd_check() {
-  require_cmd curl
-  require_cmd python3
-
-  local trace_id span_id now_ns
-  trace_id=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
-  span_id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')
-  now_ns=$(python3 -c 'import time; print(int(time.time()*1e9))')
-
-  echo
-  echo "── posting one span to the agent ──────────────────────────────────────"
-  echo "  trace_id $trace_id"
-
-  local payload
-  payload=$(
-    python3 - "$trace_id" "$span_id" "$now_ns" <<'PY'
-import json, sys
-trace_id, span_id, now = sys.argv[1], sys.argv[2], int(sys.argv[3])
-print(json.dumps({"resourceSpans": [{
-    "resource": {"attributes": [
-        {"key": "service.name", "value": {"stringValue": "agent-otel-stack-check"}}]},
-    "scopeSpans": [{
-        "scope": {"name": "just-stack-check"},
-        "spans": [{
-            "traceId": trace_id, "spanId": span_id,
-            "name": "stack-check", "kind": 1,
-            "startTimeUnixNano": str(now), "endTimeUnixNano": str(now + 1_000_000),
-            "attributes": [{"key": "gen_ai.operation.name",
-                            "value": {"stringValue": "chat"}}],
-        }],
-    }],
-}]}))
-PY
-  )
-
-  curl -fsS --max-time 10 -X POST "http://127.0.0.1:4318/v1/traces" \
-    -H 'Content-Type: application/json' -d "$payload" >/dev/null ||
-    die "$GATE" "the agent refused the span — is the stack up?"
-  ok "$GATE" "agent accepted it"
-
-  # Agent batch timeout is 5s, then the gateway's, then Tempo has to flush.
-  #
-  # Tempo returns span and trace IDs BASE64-ENCODED, not as the hex you sent.
-  # Grepping for the hex never matches, and the check then reports "no data"
-  # for a span that arrived — which is precisely the silent-wrongness this
-  # repository exists to document, so it is decoded properly here.
-  echo
-  echo "── asking tempo for it ────────────────────────────────────────────────"
-  local waited=0
-  while [ "$waited" -lt 90 ]; do
-    if curl -fsS --max-time 5 "http://127.0.0.1:3200/api/traces/$trace_id" 2>/dev/null |
-      python3 -c '
-import base64, json, sys
-want = sys.argv[1]
-try:
-    doc = json.load(sys.stdin)
-except ValueError:
-    sys.exit(1)
-for batch in doc.get("batches", []):
-    for scope in batch.get("scopeSpans", []):
-        for span in scope.get("spans", []):
-            raw = span.get("spanId", "")
-            if base64.b64decode(raw).hex() == want:
-                sys.exit(0)
-sys.exit(1)
-' "$span_id"; then
-      echo
-      ok "$GATE" "span made the full trip: agent → gateway → tempo"
-      return 0
-    fi
-    sleep 3
-    waited=$((waited + 3))
-  done
-
-  echo
-  fail "$GATE" "the span never reached tempo after ${waited}s"
-  warn "$GATE" "check the gateway: \`just logs collector-gateway\`"
-  exit 1
-}
-
 case "${1:-}" in
   init) cmd_init ;;
   up) cmd_up ;;
@@ -184,10 +101,9 @@ case "${1:-}" in
     shift
     cmd_down "$@"
     ;;
-  check) cmd_check ;;
   logs)
     shift
     cmd_logs "$@"
     ;;
-  *) die "$GATE" "usage: stack.sh {init|up|down|check|logs}" ;;
+  *) die "$GATE" "usage: stack.sh {init|up|down|logs}" ;;
 esac

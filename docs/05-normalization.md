@@ -47,11 +47,11 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, attributes/scrub, redaction/content, batch]
-      exporters: [otlp/tempo, spanmetrics]     # fan out
+      exporters: [otlp_grpc/tempo, spanmetrics]  # fan out
     metrics/from-spans:
       receivers: [spanmetrics]
       processors: [memory_limiter, batch]
-      exporters: [otlphttp/prometheus]
+      exporters: [otlp_http/prometheus]
 ```
 
 > [!CAUTION]

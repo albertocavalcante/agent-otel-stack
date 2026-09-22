@@ -137,7 +137,7 @@ processors:
   # OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE, but Copilot exposes no
   # such setting — converting here covers every surface at once, including any
   # client that ignores the env var.
-  deltatocumulative:
+  delta_to_cumulative:
     max_stale: 5m
 
   # MUST be last. Unlike the others it is order-sensitive relative to export.
@@ -189,7 +189,7 @@ extensions:
 exporters:
   # The otlphttp exporter appends the signal path, so a base of `/otlp` becomes
   # `/otlp/v1/metrics`. Set the BASE endpoint, never the full path.
-  otlphttp/gateway:
+  otlp_http/gateway:
     endpoint: ${env:OTEL_GATEWAY_ENDPOINT}
     auth:
       authenticator: bearertokenauth
@@ -212,6 +212,12 @@ exporters:
 
     # The durable buffer. `storage` is what makes it survive a restart; without
     # it the queue is memory-only and the extension above is decorative.
+    #
+    # NOTE: file_storage names its bbolt directories after the exporter, e.g.
+    # `exporter_otlp_http_gateway_traces`. Renaming an exporter therefore
+    # ORPHANS whatever was queued under the old name — it is not lost from
+    # disk, but nothing will ever drain it. Drain before renaming, or accept
+    # the orphan and delete the directory.
     #
     # block_on_overflow defaults to FALSE, which DROPS when the queue is full
     # rather than applying backpressure. On an agent, dropping is the one thing
@@ -253,13 +259,13 @@ service:
   pipelines:
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, attributes/scrub, redaction/content, attributes/metrics_cardinality, deltatocumulative, batch]
-      exporters: [otlphttp/gateway]
+      processors: [memory_limiter, attributes/scrub, redaction/content, attributes/metrics_cardinality, delta_to_cumulative, batch]
+      exporters: [otlp_http/gateway]
     logs:
       receivers: [otlp]
       processors: [memory_limiter, attributes/scrub, redaction/content, batch]
-      exporters: [otlphttp/gateway]
+      exporters: [otlp_http/gateway]
     traces:
       receivers: [otlp]
       processors: [memory_limiter, attributes/scrub, redaction/content, batch]
-      exporters: [otlphttp/gateway]
+      exporters: [otlp_http/gateway]

@@ -116,7 +116,7 @@ processors:
   # OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE, but Copilot exposes no
   # such setting — converting here covers every surface at once, including any
   # client that ignores the env var.
-  deltatocumulative:
+  delta_to_cumulative:
     max_stale: 5m
 
   # MUST be last. Unlike the others it is order-sensitive relative to export.
@@ -127,15 +127,15 @@ processors:
 exporters:
   # The otlphttp exporter appends the signal path, so `/api/v1/otlp` becomes
   # `/api/v1/otlp/v1/metrics`. Set the BASE endpoint, never the full path.
-  otlphttp/prometheus:
+  otlp_http/prometheus:
     endpoint: http://prometheus:9090/api/v1/otlp
     tls:
       insecure: true
-  otlphttp/loki:
+  otlp_http/loki:
     endpoint: http://loki:3100/otlp
     tls:
       insecure: true
-  otlp/tempo:
+  otlp_grpc/tempo:
     endpoint: tempo:4317
     tls:
       insecure: true
@@ -164,13 +164,13 @@ service:
   pipelines:
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, attributes/scrub, redaction/content, attributes/metrics_cardinality, deltatocumulative, batch]
-      exporters: [otlphttp/prometheus]
+      processors: [memory_limiter, attributes/scrub, redaction/content, attributes/metrics_cardinality, delta_to_cumulative, batch]
+      exporters: [otlp_http/prometheus]
     logs:
       receivers: [otlp]
       processors: [memory_limiter, attributes/scrub, redaction/content, batch]
-      exporters: [otlphttp/loki]
+      exporters: [otlp_http/loki]
     traces:
       receivers: [otlp]
       processors: [memory_limiter, attributes/scrub, redaction/content, batch]
-      exporters: [otlp/tempo]
+      exporters: [otlp_grpc/tempo]
