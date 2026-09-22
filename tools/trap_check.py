@@ -114,6 +114,17 @@ def main() -> int:
             f"in the trap table"
         )
 
+    # Sections must appear in the order they are numbered. Anchors resolving and
+    # the table being contiguous says nothing about where a section physically
+    # sits — trap 12 was first written between traps 2 and 3, and every
+    # assertion above passed.
+    ordered = [number for number, _ in sorted(headings.items(), key=lambda kv: kv[1][0])]
+    if ordered != sorted(ordered):
+        errors.append(
+            f"{DOC} trap sections appear in the order {ordered} — a reader "
+            f"scrolling past trap 2 should meet trap 3, not trap 12"
+        )
+
     word = NUMBER_WORDS.get(len(rows))
     for label, stated in (("count sentence", stated_count), ("section heading", stated_heading)):
         if stated is None:

@@ -50,6 +50,12 @@ processors:
         action: hash
       - key: user.account_id
         action: hash
+      # user.id arrives already sha256-shaped from Claude Code, so this looks
+      # redundant — it is not. Without it the guarantee this file makes depends
+      # on the vendor continuing to pre-hash it, which is not a guarantee.
+      # Observed live on 2026-09-22; it was absent from this list until then.
+      - key: user.id
+        action: hash
       # Copilot: always on, survives captureContent=false, no setting of
       # their own.
       - key: github.copilot.git.repository

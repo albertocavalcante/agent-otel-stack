@@ -24,8 +24,8 @@ harness at `http://127.0.0.1:4318` using [`otel/env/`](otel/env/).
 > [docs/06-stack.md](docs/06-stack.md). Still absent: Helm values and TLS.
 
 > [!CAUTION]
-> **Eleven ways a working-looking setup gives you wrong or missing data. None of
-> them error.**
+> **Twelve ways a working-looking setup gives you wrong or missing data. None
+> of them error.**
 
 ## Verify your build
 
@@ -63,7 +63,7 @@ code are readable on disk with no seat. Copilot claims here are pinned to
 copilot-chat **0.60.0** / VS Code **1.132.0** and verified **2026-09-21**;
 `just copilot-check` re-verifies them on your install.
 
-## The eleven traps
+## The twelve traps
 
 | # | Symptom | Cause | Fix |
 |---|---|---|---|
@@ -78,6 +78,7 @@ copilot-chat **0.60.0** / VS Code **1.132.0** and verified **2026-09-21**;
 | [9](#9-the-endpoint-variable-is-an-on-switch) | Copilot exporting when you only configured Claude Code | `OTEL_EXPORTER_OTLP_ENDPOINT` alone enables Copilot's OTel | Know it is a switch, not just a destination |
 | [10](#10-a-typo-in-the-endpoint-sends-data-to-localhost) | A remote endpoint configured, nothing ever arrives | `new URL()` throws, the catch falls back to `localhost:4318` | Check `enabledVia` in the Copilot Chat log |
 | [11](#11-the-protocol-setting-and-the-variable-disagree) | `protocol: "grpc"` set, `http/json` on the wire | The setting feeds the protocol only; the env var also feeds transport | Use `exporterType: otlp-grpc` |
+| [12](#12-prometheus-renames-every-metric-you-send-it) | Every dashboard panel empty, no error | Prometheus's OTLP receiver rewrites names and folds the unit in | Query the stored name, not the documented one |
 
 ### 1. No default protocol
 
@@ -246,6 +247,41 @@ own advertised value is unreachable.
 
 `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` works. The identically-named setting does not.
 Select gRPC with `exporterType: otlp-grpc`.
+
+### 12. Prometheus renames every metric you send it
+
+The names this repo documents are the names the harness emits. They are **not**
+the names Prometheus stores. Its OTLP receiver normalises: dots become
+underscores, counters gain `_total`, and **the unit is folded into the name**.
+
+| Documented | Stored in Prometheus (unit folded in) |
+|---|---|
+| `claude_code.session.count` | `claude_code_session_count_total` |
+| `claude_code.cost.usage` | `claude_code_cost_usage_USD_total` |
+| `claude_code.token.usage` | `claude_code_token_usage_tokens_total` |
+| `claude_code.active_time.total` | `claude_code_active_time_seconds_total` |
+
+Observed live on 2026-09-22 by sending one real Claude Code session through the
+stack. A panel written from the documented name renders as a flat empty graph —
+no error, no "unknown metric", just nothing. Which is indistinguishable from a
+harness that has not run.
+
+> [!WARNING]
+> **Two different normalisations coexist in the same Prometheus.** Metrics that
+> arrive over OTLP get the treatment above. The collector's *own* telemetry is
+> scraped from its Prometheus exporter and does **not** get `_total` — it is
+> `otelcol_receiver_accepted_spans`, bare. So the rule you learn writing one
+> dashboard is wrong for the other.
+
+Check before you write, on your own versions:
+
+```sh
+curl -s localhost:9090/api/v1/label/__name__/values | jq -r '.data[]' | grep claude_code
+```
+
+A related non-bug worth knowing: with a **one-shot** workload, `rate()` and
+`increase()` go empty about five minutes after the harness exits, because
+Prometheus marks the series stale. The dashboard is correct; the data stopped.
 
 ## What each harness emits
 

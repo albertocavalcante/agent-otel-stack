@@ -1,0 +1,145 @@
+{
+  "uid": "agent-otel-claude-cost",
+  "title": "Claude Code — Cost and Tokens",
+  "tags": ["agent-otel"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "description": "Spend, token volume and cache-hit rate for Claude Code. Every query here is written against the names PROMETHEUS STORES, not the names the vendor documents — its OTLP receiver rewrites both, adding the unit and a _total suffix. See README trap 12.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Spend (USD)",
+      "description": "claude_code.cost.usage arrives as claude_code_cost_usage_USD_total. This is LIST PRICE unless an org configured modelPricing (2.1.243+), so it is not what a contracted customer pays.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum(increase(claude_code_cost_usage_USD_total[$__range]))",
+          "legendFormat": "spend"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 4 }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Cache-hit rate",
+      "description": "The metric this repository exists for. cacheRead / (input + cacheRead + cacheCreation). On Claude Code this is computable from METRICS; on either Copilot surface it is traces-only (vscode#317837), which is why a metrics-only pipeline silently reports nothing for Copilot rather than reporting a gap.",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum(increase(claude_code_token_usage_tokens_total{type=\"cacheRead\"}[$__range])) / clamp_min(sum(increase(claude_code_token_usage_tokens_total{type=~\"input|cacheRead|cacheCreation\"}[$__range])), 1)",
+          "legendFormat": "cache hit"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 0.3 }, { "color": "green", "value": 0.6 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Sessions",
+      "description": "claude_code.session.count -> claude_code_session_count_total.",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum(increase(claude_code_session_count_total[$__range]))",
+          "legendFormat": "sessions"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Active time",
+      "description": "claude_code.active_time.total -> claude_code_active_time_seconds_total. The unit ends up in the NAME, not just the metadata.",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum(increase(claude_code_active_time_seconds_total[$__range]))",
+          "legendFormat": "active"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 0 }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Tokens by type",
+      "description": "Claude Code puts the token type in a LABEL; Copilot puts it in four separate span fields. That asymmetry is why the two cannot share a panel — see docs/05-normalization.md.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum by (type) (rate(claude_code_token_usage_tokens_total[5m]))",
+          "legendFormat": "{{type}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 15, "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["sum"] } }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Spend by model",
+      "description": "Note the model label can carry a suffix — `claude-opus-5[1m]` was observed live. Treat it as opaque rather than parsing it.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum by (model) (rate(claude_code_cost_usage_USD_total[5m]))",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "custom": { "drawStyle": "line", "fillOpacity": 15 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["sum"] } }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Tokens by model and type",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum by (model, type) (rate(claude_code_token_usage_tokens_total[5m]))",
+          "legendFormat": "{{model}} · {{type}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+    }
+  ]
+}
