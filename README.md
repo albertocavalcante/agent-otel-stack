@@ -30,6 +30,11 @@ Two checks need no stack and no collector at all — `just smoke` reports what
 Claude Code emits on your build (two billed calls), and `just copilot-smoke`
 reads Copilot's exporter straight off disk, needing no seat and no sign-in.
 
+That last property cuts both ways: a bundle is readable whether or not you can
+use it, so every Copilot check here can pass on an account with no seat. If
+Copilot telemetry never arrives, run `just copilot-account` before re-reading
+your config — see [docs/07-entitlement.md](docs/07-entitlement.md).
+
 > [!IMPORTANT]
 > **The stack is for verifying these configs on your machine, not for
 > production.** Grafana runs without auth and the agent→gateway hop is plain
@@ -85,6 +90,7 @@ copilot-chat **0.60.0** / VS Code **1.132.0** and verified **2026-09-21**;
 | [`docs/03-privacy.md`](docs/03-privacy.md) | What leaves the machine, and what cannot be turned off |
 | [`docs/05-normalization.md`](docs/05-normalization.md) | Joining the three shapes — and what cannot be joined |
 | [`docs/06-stack.md`](docs/06-stack.md) | The local stack: topology, and what to check when it will not start |
+| [`docs/07-entitlement.md`](docs/07-entitlement.md) | Seats: why a perfect config still produces nothing |
 | [`otel/collector-agent.yaml`](otel/collector-agent.yaml) | Laptop-resident: redaction **and** a queue that survives sleep |
 | [`otel/collector-gateway.yaml`](otel/collector-gateway.yaml) | Beside the backends: fan-out to Prometheus, Loki, Tempo |
 | [`otel/env/`](otel/env/) | Per-surface enablement — the lines you actually set |

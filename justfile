@@ -83,6 +83,14 @@ copilot-smoke dump='':
 copilot-traces:
     @./tools/copilot_traces.py
 
+# Report whether this ACCOUNT has a Copilot seat. The third leg: copilot-check
+# reads the bundle, copilot-traces reads the local store, and neither can see
+# the thing that stops both producing data. Needs network and a credential, so
+# — like `pins` — deliberately NOT in `check`.
+[doc("Report whether this account has a Copilot seat. Needs network and a credential")]
+copilot-account:
+    @./tools/copilot_account.py
+
 # Fail if a compose image digest is not its tag's manifest list. Needs network,
 # so deliberately NOT in `check`.
 [doc("Fail if a compose image digest is not its tag's manifest list. Needs network")]

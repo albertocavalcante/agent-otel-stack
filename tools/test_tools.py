@@ -317,6 +317,97 @@ def test_settings_render() -> None:
     check("  the real file yields settings", len(live) > 5, True)
 
 
+# paths.py scans .py files, so a fixture path written literally as
+# `dir/name.ext` here would be reported against THIS file. Split so the token
+# never appears whole — the same self-exemption LEAK_PATTERN and lint.sh's
+# interpreter list use, for the same reason.
+GONE = "docs/99-nonexistent." + "md"
+GONE2 = "docs/99-nope." + "md"
+
+
+# --------------------------------------------------------------------------
+# paths.py's HOME_JOIN exemption. A $HOME-relative fragment is not a repo path,
+# but `Path.home() / ".config/x.json"` was reported as a missing repo file —
+# the `~/x` form was exempt only because TOKEN's lookbehind caught the tilde.
+# --------------------------------------------------------------------------
+def test_paths_home_join() -> None:
+    print("paths.py HOME_JOIN exemption")
+    root = TOOLS.parent
+
+    def run(name: str, body: str) -> int:
+        probe = TOOLS / name
+        probe.write_text(body)
+        try:
+            return subprocess.run(
+                [str(TOOLS / "paths.py")], cwd=root, capture_output=True, text=True
+            ).returncode
+        finally:
+            probe.unlink(missing_ok=True)
+
+    cases = [
+        (
+            "_probe_p.py",
+            'import pathlib\nP = pathlib.Path.home() / ".config/gh/hosts.json"\n',
+            False,
+        ),
+        ("_probe_p.py", 'import os\nP = os.path.expanduser("~/.config/gh/hosts.json")\n', False),
+        # Negative control: the exemption must not blind the gate generally.
+        ("_probe_p.sh", f"#!/usr/bin/env bash\n# see {GONE}\n", True),
+        # The exemption is scoped to the text before the token, so a real
+        # missing path sharing a line with a home-join is still caught.
+        (
+            "_probe_p.py",
+            f'import pathlib\nP = pathlib.Path.home() / ".config/x.json"  # unlike {GONE2}\n',
+            True,
+        ),
+    ]
+    for name, body, want_fail in cases:
+        label = body.splitlines()[-1].strip()[:52]
+        check(f"  {label}", run(name, body) != 0, want_fail)
+
+
+# --------------------------------------------------------------------------
+# copilot_account.oauth_token — the credential reader. Every branch here is a
+# state a real machine is actually in, and three of them must NOT be failures.
+# --------------------------------------------------------------------------
+def test_oauth_token() -> None:
+    print("copilot_account.oauth_token")
+    import copilot_account
+
+    real = copilot_account.CREDS
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "apps.json"
+        try:
+            copilot_account.CREDS = f
+
+            check("  missing file -> no token", copilot_account.oauth_token()[0], None)
+
+            f.write_text("{not json")
+            check("  invalid JSON -> no token", copilot_account.oauth_token()[0], None)
+
+            f.write_text('{"github.com:Iv1.x": {"user": "someone"}}')
+            check("  entry without oauth_token -> None", copilot_account.oauth_token()[0], None)
+
+            # An empty-string token must be rejected, not returned. Sending one
+            # produces a 401 that reads as "your seat expired" when the real
+            # answer is "there is no credential here".
+            f.write_text('{"github.com:Iv1.x": {"oauth_token": ""}}')
+            check("  empty oauth_token -> None", copilot_account.oauth_token()[0], None)
+
+            f.write_text('{"github.com:Iv1.x": {"oauth_token": "ghu_TESTVALUE", "user": "u"}}')
+            tok, src = copilot_account.oauth_token()
+            check("  valid token is returned", tok, "ghu_TESTVALUE")
+            check("  source labels the host", src, "github.com:Iv1.x")
+
+            # Several clients may have signed in. Any one answers an ACCOUNT
+            # question, but the first entry with a token must win deterministically
+            # rather than depending on dict ordering luck.
+            f.write_text('{"a": {"user": "no-token"}, "b": {"oauth_token": "ghu_SECOND"}}')
+            check("  skips entries lacking a token", copilot_account.oauth_token()[0], "ghu_SECOND")
+        finally:
+            copilot_account.CREDS = real
+
+
 def main() -> int:
     for test in (
         test_anchor_for,
@@ -326,6 +417,8 @@ def main() -> int:
         test_check_durability,
         test_dash_check,
         test_settings_render,
+        test_paths_home_join,
+        test_oauth_token,
     ):
         test()
 

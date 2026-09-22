@@ -29,6 +29,10 @@ TOKEN = re.compile(
     r"(?<![A-Za-z0-9_./~-])([A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+\.(?:md|ya?ml|json|sh|env|py))"
 )
 
+# The ways a path gets anchored to HOME rather than to the repo. Each must end
+# at the opening quote so it only matches when the very next thing is the path.
+HOME_JOIN = re.compile(r"""(?:home\(\)\s*/\s*|expanduser\(\s*|HOME["']?\s*[,)/]?\s*)["']$""")
+
 # `.py` is here because the gates that hold this repo's paths honest are now
 # themselves Python. Without it, every path named in a gate's own source would
 # stop being checked the moment it moved out of a shell heredoc.
@@ -66,6 +70,17 @@ def main() -> int:
             for token in TOKEN.findall(line):
                 # Globs and expansions are patterns, not references.
                 if any(c in token for c in "*$[]"):
+                    continue
+                # A fragment joined onto the HOME directory is not repo-relative.
+                # `~/x.json` is already excluded by TOKEN's lookbehind, but the
+                # same path written as `Path.home() / ".config/x.json"` is not,
+                # and this gate reported it as a missing repo file.
+                #
+                # Scoped to the text immediately before THIS token rather than
+                # the whole line, so a genuine repo path sharing a line with a
+                # home-expansion is still checked.
+                before = line[: line.index(token)]
+                if HOME_JOIN.search(before):
                     continue
                 # Resolvable from the repo root OR from the directory of the
                 # file that mentions it. The `source` lines at the top of every
