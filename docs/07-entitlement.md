@@ -136,6 +136,36 @@ path you choose, logging `[OTel] Exported agent-traces.db to …`. That is a
 cleaner source for replay than reading the live database underneath a running
 extension.
 
+## There is no API to enable it, and that is the end of the matter
+
+Worth stating plainly, because it is the first thing anyone asks.
+
+The Copilot REST API is entirely organisation and enterprise seat
+administration — everything lives under `/orgs/{org}/copilot/…`. The closest
+endpoint, `POST /orgs/{org}/copilot/billing/selected_users`, assigns a *paid
+Business seat to a member of an org you administer*. There is no endpoint, REST
+or GraphQL, that starts a personal plan. Copilot Free is a self-serve consumer
+entitlement with no provisioning surface at all.
+
+So the only ways to automate it would be to drive a browser through
+`github.com/settings/copilot`, or to replay that form with a session cookie.
+Both mean accepting GitHub's terms on someone's behalf, which is a contract in
+their name. `just copilot-enable` does not do that.
+
+What it does instead is everything around the click, which is the part that
+actually goes wrong:
+
+```sh
+just copilot-enable              # report state, print the routes
+just copilot-enable --open       # ... and open the page
+just copilot-enable --watch 300  # ... and poll until the account flips
+```
+
+The watch is the point. It turns "I signed up" from an assumption into an
+observation, and then prints the three steps that still have to happen — reload,
+agent-mode request, `just copilot-traces` — each of which has already cost this
+project time by being left implicit.
+
 ## What to do when it reports ✗
 
 The gate tells you which of these you are in:

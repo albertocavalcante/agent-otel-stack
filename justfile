@@ -83,6 +83,14 @@ copilot-smoke dump='':
 copilot-traces:
     @./tools/copilot_traces.py
 
+# Guide and verify enabling Copilot on this account. There is no API for this —
+# a personal plan can only be started in the web UI, and accepting the terms is
+# yours to do. This reports the state, tells you what to do, and can watch until
+# the account actually flips. Fills, never submits.
+[doc("Guide and verify enabling Copilot. Fills, never submits — `--watch 300` to poll")]
+copilot-enable *args:
+    @./tools/copilot_enable.py {{ args }}
+
 # Report whether this ACCOUNT has a Copilot seat. The third leg: copilot-check
 # reads the bundle, copilot-traces reads the local store, and neither can see
 # the thing that stops both producing data. Needs network and a credential, so
