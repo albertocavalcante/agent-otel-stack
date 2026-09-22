@@ -360,7 +360,9 @@ invoke_agent          ← root; usage is "total input tokens (all turns)"
 > `invoke_agent` for per-turn — never add them, because the root already contains
 > the children.
 
-`github.copilot.nano_aiu` is worse: it is **stamped on the root and duplicated
+`github.copilot.nano_aiu` is worse — canonical statement of the rule and its
+caveats is [README trap 6](../README.md#6-nano_aiu-is-duplicated-onto-children).
+In short: it is **stamped on the root and duplicated
 onto every child**, so summing across spans double-counts outright. Read the root
 only, and **divide by 1e9** — the unit is billionths of an AI unit.
 

@@ -1,0 +1,34 @@
+# Prometheus for the local stack.
+#
+# Two jobs, and they are different in kind. The OTLP write path is PUSH — the
+# gateway posts to /api/v1/otlp, which only exists when the server is started
+# with --web.enable-otlp-receiver (see compose.yaml). The scrape jobs below are
+# PULL, and they collect the collectors' own self-telemetry.
+#
+# That second half is the point of the Pipeline Health dashboard: without
+# scraping the collectors, a stalled queue is invisible, because a collector
+# that cannot export also cannot tell you it cannot export.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # The agent's own metrics. `otelcol_exporter_queue_size`,
+  # `otelcol_exporter_send_failed_*` and `otelcol_exporter_enqueue_failed_*`
+  # all come from here.
+  - job_name: collector-agent
+    static_configs:
+      - targets: ["collector-agent:8888"]
+        labels:
+          collector_role: agent
+
+  - job_name: collector-gateway
+    static_configs:
+      - targets: ["collector-gateway:8888"]
+        labels:
+          collector_role: gateway
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

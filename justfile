@@ -62,6 +62,26 @@ copilot-smoke dump='':
 copilot-traces:
     @./tools/copilot_traces.py
 
+# Generate .env with a local dev token. Idempotent; never overwrites a token.
+stack-init:
+    @./tools/stack.sh init
+
+# Bring the local stack up and wait until every service is actually serving
+up:
+    @./tools/stack.sh up
+
+# Stop the stack. `just down --volumes` also drops the agent's queue.
+down *args:
+    @./tools/stack.sh down {{ args }}
+
+# Post one span to the agent and prove it reaches Tempo
+stack-check:
+    @./tools/stack.sh check
+
+# Follow stack logs. `just logs collector-gateway` for one service.
+logs *args:
+    @./tools/stack.sh logs {{ args }}
+
 # Word count and link count per document
 stats:
     #!/usr/bin/env bash

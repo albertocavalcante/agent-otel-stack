@@ -1,0 +1,188 @@
+{
+  "uid": "agent-otel-pipeline-health",
+  "title": "Pipeline Health",
+  "tags": ["agent-otel"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "description": "Is the telemetry pipeline itself alive? This is the dashboard that would have caught a collector nobody noticed was down. Build it before the dashboards that read the data, because those cannot tell you they are showing you nothing.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "DEADMAN — is anything arriving?",
+      "description": "Fires when the agent has accepted no spans for 10 minutes. An empty graph looks identical to a healthy idle system; this does not. Pair it with a business-hours guard before alerting on it, or it will page you at 3am for nobody working.",
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "absent_over_time(otelcol_receiver_accepted_spans{collector_role=\"agent\"}[10m]) or vector(0)",
+          "legendFormat": "no data"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "RECEIVING", "color": "green", "index": 0 } } },
+            { "type": "value", "options": { "1": { "text": "NO DATA 10m", "color": "red", "index": 1 } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Queue depth vs capacity",
+      "description": "otelcol_exporter_queue_size does NOT reflect on-disk depth once a storage extension is configured (contrib#30608). Treat a flat zero here with suspicion and check the volume.",
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "max(otelcol_exporter_queue_size{collector_role=\"agent\"})",
+          "legendFormat": "in queue"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "max(otelcol_exporter_queue_capacity{collector_role=\"agent\"})",
+          "legendFormat": "capacity"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Dropped before the queue",
+      "description": "enqueue_failed is a DIFFERENT failure from send_failed: the item never entered the queue, so no retry will ever happen. With block_on_overflow:true this should stay at zero; anything else means the agent is shedding load silently.",
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum(increase(otelcol_exporter_enqueue_failed_spans[1h])) + sum(increase(otelcol_exporter_enqueue_failed_log_records[1h])) + sum(increase(otelcol_exporter_enqueue_failed_metric_points[1h]))",
+          "legendFormat": "dropped 1h"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Export failures by signal",
+      "description": "send_failed means the batch reached the exporter and the backend refused it. Sustained non-zero with max_elapsed_time:0 means retrying forever — which is correct, and also means the queue is growing.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum by (collector_role) (rate(otelcol_exporter_send_failed_spans[5m]))",
+          "legendFormat": "{{collector_role}} spans"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum by (collector_role) (rate(otelcol_exporter_send_failed_log_records[5m]))",
+          "legendFormat": "{{collector_role}} logs"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum by (collector_role) (rate(otelcol_exporter_send_failed_metric_points[5m]))",
+          "legendFormat": "{{collector_role}} metrics"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Accepted vs refused, by collector",
+      "description": "The receiver side. A refused count rising while accepted holds steady is backpressure reaching the producer — which on Copilot means the batch is simply dropped, because its exporter has no retry.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum by (collector_role) (rate(otelcol_receiver_accepted_spans[5m]))",
+          "legendFormat": "{{collector_role}} accepted"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum by (collector_role) (rate(otelcol_receiver_refused_spans[5m]))",
+          "legendFormat": "{{collector_role}} refused"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Memory limiter refusals",
+      "description": "Use the _memory_limiter_ qualified names. The bare otelcol_processor_dropped_spans is legacy and is non-zero under ordinary backpressure with no real loss (collector#11203).",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum by (collector_role) (rate(otelcol_processor_memory_limiter_refused_spans[5m]))",
+          "legendFormat": "{{collector_role}} spans refused"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
+          "expr": "sum by (collector_role) (rate(otelcol_processor_memory_limiter_refused_log_records[5m]))",
+          "legendFormat": "{{collector_role}} logs refused"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+    }
+  ]
+}

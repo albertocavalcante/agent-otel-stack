@@ -1,0 +1,133 @@
+# The local stack. `just up`.
+#
+# Both collectors mount the repository's OWN configs read-only — nothing here
+# duplicates them. If otel/collector-agent.yaml is wrong, this stack fails to
+# start, which is the point: the thing documented is the thing that runs.
+#
+# Topology, and why it is two collectors rather than one:
+#
+#   producer ──▶ collector-agent ──▶ collector-gateway ──┬─▶ prometheus
+#   (host)       durable queue        fan-out            ├─▶ loki
+#                                                        └─▶ tempo ──▶ grafana
+#
+# The agent is the half that has to survive a laptop: it queues to disk and
+# retries forever. The gateway sits beside the backends and deliberately does
+# not. Running both locally means the agent's persistent queue is exercised —
+# stop the gateway, keep producing, start it again, and the spans arrive.
+#
+# Images are pinned by DIGEST. A tag is mutable; a digest is the artefact.
+#
+# LOCAL USE ONLY. Grafana runs anonymous-admin and the agent→gateway hop is
+# plain HTTP inside the compose network. A real deployment terminates TLS —
+# see docs/06-stack.md.
+
+name: agent-otel
+
+services:
+  collector-agent:
+    # renovate: otel/opentelemetry-collector-contrib:0.160.0
+    image: docker.io/otel/opentelemetry-collector-contrib@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel/collector-agent.yaml:/etc/otelcol/config.yaml:ro
+      - agent-queue:/var/lib/otelcol
+    environment:
+      # No default. A missing token must fail loudly rather than start an
+      # unauthenticated agent that looks healthy.
+      OTEL_GATEWAY_TOKEN: ${OTEL_GATEWAY_TOKEN:?run `just stack-init` first}
+      OTEL_GATEWAY_ENDPOINT: http://collector-gateway:4318
+      OTEL_AGENT_STATE_DIR: /var/lib/otelcol
+      # Inside a container, 127.0.0.1 is the CONTAINER's loopback and the
+      # published port cannot reach it. Bind wide here; the host-side port
+      # mapping below is what keeps it loopback-only on your machine.
+      OTEL_BIND_HOST: 0.0.0.0
+    ports:
+      # Loopback only. This is a developer machine, not a listener.
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:13133:13133"
+    depends_on:
+      collector-gateway:
+        condition: service_started
+    restart: unless-stopped
+
+  collector-gateway:
+    # renovate: otel/opentelemetry-collector-contrib:0.160.0
+    image: docker.io/otel/opentelemetry-collector-contrib@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel/collector-gateway.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+    restart: unless-stopped
+
+  prometheus:
+    # renovate: prom/prometheus:v3.14.0
+    image: docker.io/prom/prometheus@sha256:2d25f68eb7aa2e654dadd83b45e5757259b32a1e4b6bc370f1eec927f491265b
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # Without this the gateway's POST to /api/v1/otlp 404s, its retry queue
+      # fills, and nothing says so. The failure looks like "Prometheus is up".
+      - --web.enable-otlp-receiver
+      - --storage.tsdb.retention.time=24h
+    volumes:
+      - ./otel/stack/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    restart: unless-stopped
+
+  loki:
+    # renovate: grafana/loki:3.7.8
+    image: docker.io/grafana/loki@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./otel/stack/loki.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    restart: unless-stopped
+
+  tempo:
+    # renovate: grafana/tempo:3.0.3
+    image: docker.io/grafana/tempo@sha256:0296560ac66f8a3600d7fb3014a52c189d4d9c3549ad6ff441bf2409855d68d5
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    volumes:
+      - ./otel/stack/tempo.yaml:/etc/tempo/config.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "127.0.0.1:3200:3200"
+    restart: unless-stopped
+
+  grafana:
+    # renovate: grafana/grafana:12.4.9
+    image: docker.io/grafana/grafana@sha256:9b58461280b4d2992d4399823c9427d0fcf5f0fd7f376c93f2dea876158b867b
+    volumes:
+      - ./dashboards/provisioning:/etc/grafana/provisioning/datasources:ro
+      - ./dashboards/dashboard-provider:/etc/grafana/provisioning/dashboards:ro
+      - ./dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  # The agent's bbolt queue. `just down` keeps it; `just down --volumes` drops
+  # it. Keeping it is what makes the restart-durability check meaningful.
+  agent-queue:
+  prometheus-data:
+  loki-data:
+  tempo-data:

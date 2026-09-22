@@ -1,5 +1,7 @@
 # OpenTelemetry Collector — the AGENT half, running on the developer machine.
-# Targets otelcol-contrib 0.161.0 — `attributes`, `redaction` and
+# Targets otelcol-contrib 0.160.0 — the newest PUBLISHED container tag.
+# 0.161.0 exists as a release but not as an image, so a config claiming it
+# cannot be run on a matching build. `attributes`, `redaction` and
 # `file_storage` are contrib-only; the core image cannot do this.
 #
 # This is the half that has to survive a laptop. It sleeps, it loses the
@@ -23,10 +25,17 @@
 receivers:
   otlp:
     protocols:
+      # Loopback by DEFAULT — this is a developer machine, not a listener.
+      #
+      # OTEL_BIND_HOST exists because "loopback" means something different
+      # inside a container: 127.0.0.1 there is the container's own loopback,
+      # unreachable from the host even with the port published. The compose
+      # stack sets 0.0.0.0 and publishes to 127.0.0.1 on the host instead,
+      # which gives the same exposure by a different mechanism.
       grpc:
-        endpoint: 127.0.0.1:4317
+        endpoint: ${env:OTEL_BIND_HOST:-127.0.0.1}:4317
       http:
-        endpoint: 127.0.0.1:4318
+        endpoint: ${env:OTEL_BIND_HOST:-127.0.0.1}:4318
 
 processors:
   # MUST be first in every pipeline. If it is not, the collector can OOM before
@@ -144,7 +153,7 @@ processors:
 
 extensions:
   health_check:
-    endpoint: 127.0.0.1:13133
+    endpoint: ${env:OTEL_BIND_HOST:-127.0.0.1}:13133
     path: /ready
 
   # Bearer token for the gateway. Kept out of this file deliberately: `just
@@ -238,7 +247,7 @@ service:
         - pull:
             exporter:
               prometheus:
-                host: 127.0.0.1
+                host: ${env:OTEL_BIND_HOST:-127.0.0.1}
                 port: 8888
 
   pipelines:

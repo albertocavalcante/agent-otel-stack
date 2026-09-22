@@ -114,7 +114,9 @@ Claude Code metrics are counters; sum them normally.
 
 Copilot spans are **not** safe to sum. `invoke_agent` is the root and its token
 counts already include every child `chat` span — *"total input tokens (all
-turns)"*. And `nano_aiu` is duplicated onto the children outright.
+turns)"*. And `nano_aiu` is duplicated onto the children outright — see
+[README trap 6](../README.md#6-nano_aiu-is-duplicated-onto-children) for the
+÷1e9 unit and the caveat on how well-sourced the duplication rule is.
 
 > [!IMPORTANT]
 > On Copilot, aggregate at **exactly one level**: `chat` for per-model, or

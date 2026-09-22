@@ -1,0 +1,20 @@
+# Grafana dashboard provider. Separate directory from the datasource
+# provisioning because Grafana wants one provider type per directory, and
+# because `just dash-check` scans dashboards/ for dashboard JSON — a provider
+# file living beside them would be read as a malformed dashboard.
+apiVersion: 1
+
+providers:
+  - name: agent-otel
+    orgId: 1
+    folder: agent-otel
+    type: file
+    disableDeletion: false
+    # The JSON is the source of truth, not the UI. Edits made in Grafana are
+    # overwritten on the next reload, which is deliberate: a dashboard that
+    # drifts from the file is one `just dash-check` cannot verify.
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

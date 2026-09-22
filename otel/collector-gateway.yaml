@@ -1,5 +1,6 @@
 # OpenTelemetry Collector — the GATEWAY half, running beside the backends.
-# Targets otelcol-contrib 0.161.0 — `attributes` and `redaction` are
+# Targets otelcol-contrib 0.160.0 — the newest PUBLISHED container tag;
+# 0.161.0 is a release with no image. `attributes` and `redaction` are
 # contrib-only; the core image cannot do this.
 #
 # Why a collector when Prometheus, Loki and Tempo all accept OTLP directly:
@@ -146,6 +147,20 @@ extensions:
 
 service:
   extensions: [health_check]
+
+  # Self-observability. The Pipeline Health dashboard reads both collectors;
+  # without this the gateway half of every panel is empty and reads as "no
+  # failures" rather than "not measured".
+  telemetry:
+    metrics:
+      level: normal
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+
   pipelines:
     metrics:
       receivers: [otlp]

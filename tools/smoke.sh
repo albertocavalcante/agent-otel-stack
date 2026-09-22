@@ -39,6 +39,14 @@ cat "$OUT_DIR/p1.out" "$OUT_DIR/p1.err" >"$OUT_DIR/p1.raw"
 # line echoing the prompt before asserting on it.
 grep -vF -- "$PROMPT" "$OUT_DIR/p1.raw" >"$OUT_DIR/p1.all" || true
 
+# Stripping the prompt is not enough. The model's ANSWER can name a metric too —
+# ask it what claude_code.token.usage measures and it will write the string
+# back at you, satisfying the required-metric assertions with a dead pipeline.
+# So the required checks below run against exporter-shaped lines only: the
+# console exporter frames every record with these markers, and prose does not.
+grep -E 'descriptor|dataPoints|InstrumentationScope|resource\.attributes|ScopeMetrics|Attributes\(' \
+  "$OUT_DIR/p1.all" >"$OUT_DIR/p1.exporter" || true
+
 METRICS=(
   claude_code.session.count
   claude_code.lines_of_code.count
@@ -60,11 +68,21 @@ for m in "${METRICS[@]}"; do
 done
 echo "  → $seen/${#METRICS[@]} documented metrics observed"
 
-# A metric name appearing proves the pipeline works. Not every metric fires on a
-# trivial prompt — commit.count and pull_request.count need a commit and a PR —
-# so only the always-on ones are treated as required.
+# Positive control FIRST. If nothing in the output is exporter-shaped, the
+# required assertions below would be comparing against an empty file and every
+# one of them would fail for the wrong reason — or, if inverted, pass for one.
+if [ ! -s "$OUT_DIR/p1.exporter" ]; then
+  warn smoke "no exporter-framed output at all — the console exporter produced nothing"
+  die smoke "telemetry is not reaching the exporter"
+fi
+
+# A metric name appearing proves the pipeline works ONLY when it appears inside
+# exporter output. Not every metric fires on a trivial prompt — commit.count
+# and pull_request.count need a commit and a PR — so only the always-on ones
+# are required.
 for required in claude_code.session.count claude_code.token.usage; do
-  grep -qF "$required" "$OUT_DIR/p1.all" || die smoke "$required never appeared — telemetry is not reaching the exporter"
+  grep -qF "$required" "$OUT_DIR/p1.exporter" ||
+    die smoke "$required never appeared in exporter output — telemetry is not reaching the exporter"
 done
 
 if grep -qF 'claude_code.api_request' "$OUT_DIR/p1.all"; then

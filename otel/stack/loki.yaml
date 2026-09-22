@@ -1,0 +1,49 @@
+# Loki, single binary, filesystem storage. Local verification only.
+#
+# reject_old_samples_max_age is the one setting here that is not a default for
+# a reason. Anything replayed from a backlog — the agent's persistent queue
+# after an outage, or a future replay out of agent-traces.db — is OLD by
+# definition, and Loki's default rejection window turns "we recovered the data"
+# into "we recovered the data and Loki threw it away". See docs/06-stack.md.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # Default is 7d. A queue that drained after a long offline period would be
+  # silently discarded at the door.
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  # Out-of-order writes are what a replay looks like.
+  unordered_writes: true
+  allow_structured_metadata: true
+  volume_enabled: true
+
+analytics:
+  reporting_enabled: false

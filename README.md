@@ -3,12 +3,25 @@
 OpenTelemetry for **Claude Code** and **GitHub Copilot**: enablement per surface, a
 redaction-first collector config, and checks that run without a collector.
 
+## Quickstart
+
+```sh
+just stack-init   # local dev token in a gitignored .env
+just up           # agent + gateway + prometheus + loki + tempo + grafana
+just stack-check  # posts one span, proves it reaches Tempo
+```
+
+Grafana on `http://127.0.0.1:3000` with a Pipeline Health dashboard. Point a
+harness at `http://127.0.0.1:4318` using [`otel/env/`](otel/env/).
+
 > [!IMPORTANT]
-> **This is documentation and configuration, not a deployment.** There is no
-> compose file, no container and no dashboard JSON. What you get: two collector
-> configs to drop into an `otelcol-contrib` you run yourself, per-surface
-> enablement, and gates that verify the claims below against the build on your
-> machine. If you wanted `docker compose up`, this is not that yet.
+> **The stack is for verifying these configs on your machine, not for
+> production.** Grafana runs without auth and the agent→gateway hop is plain
+> HTTP. What it does share with a real deployment is the configs — both
+> collectors mount [`otel/collector-agent.yaml`](otel/collector-agent.yaml) and
+> [`otel/collector-gateway.yaml`](otel/collector-gateway.yaml) directly, so if
+> those are wrong it fails to start. Details in
+> [docs/06-stack.md](docs/06-stack.md). Still absent: Helm values and TLS.
 
 > [!CAUTION]
 > **Eleven ways a working-looking setup gives you wrong or missing data. None of
