@@ -125,7 +125,7 @@ processors:
     timeout: 5s
 
 exporters:
-  # The otlphttp exporter appends the signal path, so `/api/v1/otlp` becomes
+  # The otlp_http exporter appends the signal path, so `/api/v1/otlp` becomes
   # `/api/v1/otlp/v1/metrics`. Set the BASE endpoint, never the full path.
   otlp_http/prometheus:
     endpoint: http://prometheus:9090/api/v1/otlp

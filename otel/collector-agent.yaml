@@ -187,7 +187,7 @@ extensions:
       rebound_trigger_threshold_mib: 10
 
 exporters:
-  # The otlphttp exporter appends the signal path, so a base of `/otlp` becomes
+  # The otlp_http exporter appends the signal path, so a base of `/otlp` becomes
   # `/otlp/v1/metrics`. Set the BASE endpoint, never the full path.
   otlp_http/gateway:
     endpoint: ${env:OTEL_GATEWAY_ENDPOINT}

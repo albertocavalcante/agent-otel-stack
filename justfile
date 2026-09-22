@@ -62,6 +62,11 @@ copilot-smoke dump='':
 copilot-traces:
     @./tools/copilot_traces.py
 
+# Fail if a compose image digest is not its tag's manifest list. Needs network,
+# so deliberately NOT in `check`.
+pins:
+    @./tools/pins_check.py
+
 # Generate .env with a local dev token. Idempotent; never overwrites a token.
 stack-init:
     @./tools/stack.sh init

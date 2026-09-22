@@ -39,6 +39,12 @@ import report
 
 GATE = "stack-check"
 
+# urllib honours HTTP_PROXY/HTTPS_PROXY by default, which on a machine with a
+# corporate proxy set routes these 127.0.0.1 calls through it and fails for
+# reasons that have nothing to do with the stack. Every request here is
+# loopback, so proxies are disabled outright.
+OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 AGENT_TRACES = "http://127.0.0.1:4318/v1/traces"
 TEMPO_TRACE = "http://127.0.0.1:3200/api/traces/{trace_id}"
 
@@ -88,7 +94,7 @@ def post(url: str, payload: bytes, timeout: int = 10) -> int:
     request = urllib.request.Request(
         url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+    with OPENER.open(request, timeout=timeout) as response:
         return response.status
 
 
@@ -111,7 +117,7 @@ def await_trace(trace_id: str, span_id: str, budget: int) -> bool:
     waited = 0
     while waited < budget:
         try:
-            with urllib.request.urlopen(url, timeout=5) as response:  # noqa: S310
+            with OPENER.open(url, timeout=5) as response:
                 if contains_span(json.load(response), span_id):
                     return True
         except (urllib.error.URLError, ValueError, TimeoutError):

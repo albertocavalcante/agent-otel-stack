@@ -17,6 +17,12 @@
 #
 # Images are pinned by DIGEST. A tag is mutable; a digest is the artefact.
 #
+# The digest must be the MANIFEST-LIST one, not an architecture's sub-manifest.
+# `podman image inspect ... RepoDigests` on an arm64 machine can hand you the
+# arm64 digest, which then pulls an arm64 image on an amd64 host and fails with
+# an exec-format error. `just pins` checks every digest here against the
+# registry and is the reason this comment is not just advice.
+#
 # LOCAL USE ONLY. Grafana runs anonymous-admin and the agent→gateway hop is
 # plain HTTP inside the compose network. A real deployment terminates TLS —
 # see docs/06-stack.md.
@@ -73,7 +79,7 @@ services:
 
   prometheus:
     # renovate: prom/prometheus:v3.14.0
-    image: docker.io/prom/prometheus@sha256:2d25f68eb7aa2e654dadd83b45e5757259b32a1e4b6bc370f1eec927f491265b
+    image: docker.io/prom/prometheus@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       # Without this the gateway's POST to /api/v1/otlp 404s, its retry queue
