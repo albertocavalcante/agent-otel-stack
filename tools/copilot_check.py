@@ -11,9 +11,11 @@ the whole time, because
 Copilot ships built into VS Code rather than as a marketplace extension — so a
 gate can simply look.
 
-Not finding VS Code is not a failure. On a machine without it this warns and
-passes, the same way pass 3 of the smoke gate refuses to conclude from a missing
-positive control.
+Not finding VS Code is not a failure: on a machine without it this warns and
+passes. That is also why this gate is NOT in `just check` — a gate whose result
+depends on what happens to be installed would spend most of its life reporting
+✓ having verified nothing, which is the exact failure this repository documents.
+Run it deliberately, like `just pins`.
 """
 
 import json

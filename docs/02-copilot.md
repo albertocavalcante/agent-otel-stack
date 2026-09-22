@@ -19,11 +19,10 @@ Verified **2026-09-21** against the shipping build: **copilot-chat 0.60.0**, hos
 > despite `captureContent: false` (see [03-privacy.md](03-privacy.md)). Both
 > need a signed-in session to settle.
 >
-> Static reading is also not infallible. On 2026-09-21 a review of this document
-> found two claims that static reading got **wrong**: a `chat.agentHost.otel.*`
-> namespace that does not exist, and a retention mechanism reported as absent
-> that is present. Both are corrected below, and both came from greps that
-> matched something adjacent to the thing being claimed.
+> Static reading is not infallible either. Two claims here were once wrong
+> because a grep matched something *adjacent* to the thing being claimed — a log
+> tag mistaken for a settings namespace, and a retention routine missed entirely.
+> Anchor on the code that runs, not on a string that resembles it.
 
 ## It is five surfaces over two engines
 
@@ -35,26 +34,45 @@ headers on a cleartext endpoint — see below.
 | Surface | Engine | Configured by |
 |---|---|---|
 | VS Code Copilot Chat | own instrumentation | `github.copilot.chat.otel.*` |
-| VS Code **agent host** | CLI runtime as a stdio child | none of its own — relays to the extension, see [04-surfaces.md](04-surfaces.md) |
+| VS Code **agent host** | CLI runtime as a stdio child | none of its own — it relays, see below |
 | Copilot CLI | CLI runtime | `COPILOT_OTEL_*` env |
 | Copilot SDK | wraps the CLI runtime | `TelemetryConfig` → env |
 | Copilot desktop | CLI runtime, embedded | env only |
 
 Managed telemetry is documented as applying to *"both the Copilot Chat extension
-and the agent host process"*. The agent host has **no settings namespace of its
-own** — an earlier claim that it did was wrong and is retracted in
-[04-surfaces.md](04-surfaces.md). What it has is a loopback OTLP receiver: it
-spawns the CLI as a stdio child, listens on `127.0.0.1`, and relays what the
-child sends. Its telemetry therefore follows the extension's configuration, and
-the `http://` on that hop is internal to one process tree.
+and the agent host process"*, which is only worth saying if they are separately
+configurable. They are not: **the agent host has no settings namespace of its
+own.** `chat.agentHost.otel.*` does not exist — zero occurrences in the agent
+host, the extension bundle or `package.json`. A grep for `agentHost.otel`
+matches `[agentHost-otel]` log tags and an `agentHostOTelService` DI brand,
+which is how that claim gets made.
+
+Concretely, it binds its own **in-process OTLP receiver on loopback**:
+
+```js
+i.listen(0, "127.0.0.1", …)
+n.info(`[agentHost-otel] receiver listening on http://127.0.0.1:${port}`)
+```
+
+It binds an ephemeral port, spawns the Copilot CLI as a stdio child pointed at
+it, and forwards what arrives onward. So the agent host is a *relay*, not a
+second independently-configured exporter — which is why it has no settings of
+its own, and why its telemetry follows the extension's configuration.
+
+That it spawns the CLI is observed, not inferred — `agentHostMain.js` contains
+`"[Copilot] Starting CopilotClient..."` and constructs the child over stdio. So
+the CLI's behaviour does reach you inside VS Code; it is the `http://` half of
+the old inference that was wrong, not this half.
+
+Its telemetry therefore follows the extension's configuration, and the `http://`
+on that hop is internal to one process tree.
 
 ## The `http://` refusal, and what it is actually about
 
 > [!CAUTION]
-> **This section previously said the CLI "silently disables export to any
-> `http://` endpoint". That was a misreading and is corrected here.** It was
-> sourced from [copilot-cli#4567][cli4567] and from a `copilot help monitoring`
-> quote, and never reproduced.
+> **[copilot-cli#4567][cli4567] says the CLI silently disables export to any
+> `http://` endpoint. The binary does something narrower.** The issue is widely
+> cited; what follows is read from the shipped runtime.
 
 There are **four** Copilot CLI runtimes reachable on a typical machine, and the
 newest is not where you would look first:
@@ -253,13 +271,10 @@ a `cached_tokens` column that is entirely NULL is the difference between having
 that data and only appearing to. It also compares the store's columns against
 the installed bundle's DDL, so the two cannot drift apart unnoticed.
 
-**Retention is 7 days**, confirmed in 0.60.0 rather than inferred: the store
-runs `DELETE FROM spans WHERE start_time_ms < ?` on open, with a window of
-`10080*60*1e3` — 10,080 minutes, exactly seven days — alongside a most-recent-100
-sessions bound. That is the hard ceiling on how far back any replay can reach.
-
-(An earlier revision of this section said the retention code "was not located in
-the shipped bundle". It is there; the search was inadequate.)
+**Retention is 7 days.** The store runs `DELETE FROM spans WHERE start_time_ms < ?`
+on open, with a window of `10080*60*1e3` — 10,080 minutes, exactly seven days —
+alongside a most-recent-100-sessions bound. That is the hard ceiling on how far
+back any replay can reach.
 
 ## VS Code settings
 

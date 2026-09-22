@@ -3,7 +3,7 @@
 Three producers, no shared schema. This is the part nobody has published, and it
 is mostly a story about what **cannot** be joined.
 
-Read [04-surfaces.md](04-surfaces.md) first — this page assumes it.
+Read [02-copilot.md](02-copilot.md) first — this page assumes it.
 
 ## What the same fact is called
 

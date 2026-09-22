@@ -1,0 +1,54 @@
+# Until this existed, every gate in this repository ran only where somebody had
+# remembered `lefthook install`. A fork, a pull request, or a fresh clone that
+# skipped setup got no enforcement at all — and `lefthook.yml` says so in its
+# own first comment. That is a repo whose checks are advisory pretending to be a
+# repo whose checks are binding.
+#
+# `just check` is deliberately network-free, so it runs here unchanged. The two
+# gates that depend on the outside world are excluded by design and run on
+# demand: `just pins` needs a registry, `just copilot-check` needs a local
+# VS Code install.
+
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install just, shellcheck, shfmt
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          curl -fsSL https://github.com/casey/just/releases/latest/download/just-x86_64-unknown-linux-musl.tar.gz \
+            | sudo tar xz -C /usr/local/bin just
+          curl -fsSL -o /usr/local/bin/shfmt \
+            https://github.com/mvdan/sh/releases/latest/download/shfmt_v3.12.0_linux_amd64
+          sudo chmod +x /usr/local/bin/shfmt
+
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: --version
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: PyYAML for otel-check
+        run: pip install --quiet pyyaml
+
+      - name: just check
+        run: just check
+
+      - name: Tool self-tests
+        run: just test

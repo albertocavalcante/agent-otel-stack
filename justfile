@@ -1,7 +1,7 @@
 default: check
 
 # Run every repository check
-check: leaks links refs paths trap-check lint fmt-check otel-check dash-check copilot-check
+check: leaks links refs paths trap-check lint fmt-check otel-check dash-check
     @echo "✓ all checks passed"
 
 # Fail if personal paths or credential-shaped strings would be committed
@@ -32,9 +32,16 @@ otel-check:
 dash-check:
     @./tools/dash-check.sh
 
-# Fail if a documented Copilot setting has drifted from the installed VS Code
+# Fail if a documented Copilot setting has drifted from the installed VS Code.
+# Depends on local machine state, so — like `pins` — deliberately NOT in `check`:
+# on a machine without VS Code it can only warn and pass, and a gate that
+# reports ✓ having verified nothing is this repo's own subject matter.
 copilot-check:
     @./tools/copilot_check.py
+
+# Run the gates' own self-tests
+test:
+    @./tools/test_tools.py
 
 # Static-analyse every shell script
 lint:

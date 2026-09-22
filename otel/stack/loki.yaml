@@ -2,11 +2,9 @@
 #
 # reject_old_samples_max_age is widened here, and it matters how far.
 #
-# Loki's DEFAULT is 1w — which is 168h. An earlier revision of this file set
-# 168h and claimed it was a deliberate override; it was the default written out
-# longhand, and it changed nothing. Anything replayed from a backlog is old by
-# definition, so the window has to be wider than the outage you expect to
-# survive, not equal to the default.
+# Loki's DEFAULT is 1w — which is 168h, so "168h" is not a widening. Anything
+# replayed from a backlog is old by definition, and the window has to be wider
+# than the outage you expect to survive.
 
 auth_enabled: false
 

@@ -95,10 +95,9 @@ reason: anything replayed from a backlog is *old by definition*, and too narrow
 a window turns "we recovered the data" into "we recovered the data and Loki
 threw it away".
 
-Note the unit trap that caught this repo: Loki's default is `1w`, which is
-**168h**. An earlier revision set `168h` and described it as an override. It was
-the default, written longhand, changing nothing. If you widen this, check the
-number against the default rather than against your assumption of it.
+Mind the unit when you set it: Loki's default is `1w`, which is **168h**. A
+"widened" window of 168h is the default written longhand and changes nothing.
+Check the number against the default, not against your assumption of it.
 
 ## On this machine: podman cannot see `/Volumes`
 

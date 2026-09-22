@@ -46,15 +46,17 @@ mapfile -t shell < <(sh_files)
 # reason. `pytho[n]3?` matches "python3"; the literal text does not.
 #
 # The name must sit in COMMAND position — start of line, or after whitespace,
-# `;`, `&`, `|`, `(` or `=` — and be followed by whitespace, `<` or end of
+# `;`, `&`, `|`, `(`, `=` or `/` — and be followed by whitespace, `<` or end of
 # line. Without that last part the pattern also matched the bash array
-# `${python[@]}` in this very file, since the `3` is optional.
+# `${python[@]}` in this very file, since the `3` is optional; without `/` it
+# missed `/usr/bin/python3 -c`, which the committed self-tests caught after a
+# hand-run drill list had silently stopped covering it.
 INTERPRETERS='pytho[n]3?|rub[y]|per[l]|nod[e]|osascrip[t]'
 
 embedded=0
 for f in "${shell[@]}"; do
   if sed -e 's/[[:space:]]#.*$//' -e '/^[[:space:]]*#/d' "$f" |
-    grep -nE "(^|[[:space:];&|(=])($INTERPRETERS)([[:space:]<]|$)" |
+    grep -nE "(^|[[:space:];&|(=/])($INTERPRETERS)([[:space:]<]|$)" |
     grep -vE '(command -v|require_cmd)[[:space:]]+('"$INTERPRETERS"')'; then
     echo "✗ lint: $f names an interpreter — move that work to its own file" >&2
     embedded=1

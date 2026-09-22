@@ -9,9 +9,14 @@ fragments from the rest; `just refs` only handles reference-style links; `just
 paths` needs a slash and a file extension. So a misspelled anchor rendered as a
 dead link on GitHub and `just check` stayed green.
 
-The count is part of the claim too. "Eleven ways a working-looking setup gives
-you wrong or missing data" is a promise about the table directly beneath it, and
-a table that grew without the sentence changing makes the landing page lie.
+The count is part of the claim too. "Twelve of those differences are traps" is a
+promise about the table beneath it, and a table that grew without the sentence
+changing makes the landing page lie.
+
+Since the write-ups moved to their own document, this reads BOTH files: rows
+from the README, sections from docs/00-traps.md. A row's anchor now has to
+resolve across a file boundary, which `just links` cannot see — it strips
+fragments and never checks what they point at.
 """
 
 import re
@@ -23,11 +28,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import report
 
 GATE = "trap-check"
-DOC = "README.md"
 
-ROW = re.compile(r"^\|\s*\[(\d+)\]\(#([^)]+)\)\s*\|")
+# The table lives on the landing page; the twelve write-ups live in their own
+# document. That split is why this gate reads two files: a row's link has to
+# resolve to a heading in the OTHER file, which no other gate checks —
+# `just links` strips fragments and never looks at what they point to.
+DOC = "README.md"
+TRAPS = "docs/00-traps.md"
+
+ROW = re.compile(r"^\|\s*\[(\d+)\]\(" + re.escape(TRAPS) + r"#([^)]+)\)\s*\|")
 HEADING = re.compile(r"^###\s+(\d+)\.\s+(.*?)\s*$")
-COUNT_SENTENCE = re.compile(r"^>\s*\*\*(\w+) ways a working-looking setup", re.IGNORECASE)
+# The count is claimed twice on the landing page: once in the opening
+# paragraph and once in the section heading. Both are promises about the table
+# beneath them, and a table that grows without them makes the front door lie.
+COUNT_SENTENCE = re.compile(r"^(\w+) of those differences are traps", re.IGNORECASE)
 SECTION_HEADING = re.compile(r"^##\s+The (\w+) traps\s*$", re.IGNORECASE)
 
 NUMBER_WORDS = {
@@ -58,6 +72,7 @@ def main() -> int:
     report.enter_repo_root()
 
     lines = Path(DOC).read_text(encoding="utf-8").splitlines()
+    trap_lines = Path(TRAPS).read_text(encoding="utf-8").splitlines()
 
     rows: list[tuple[int, int, str]] = []
     headings: dict[int, tuple[int, str]] = {}
@@ -68,15 +83,17 @@ def main() -> int:
         row = ROW.match(line)
         if row:
             rows.append((n, int(row.group(1)), row.group(2)))
-        heading = HEADING.match(line)
-        if heading:
-            headings[int(heading.group(1))] = (n, heading.group(2))
         count = COUNT_SENTENCE.match(line)
         if count:
             stated_count = (n, count.group(1).lower())
         section = SECTION_HEADING.match(line)
         if section:
             stated_heading = (n, section.group(1).lower())
+
+    for n, line in enumerate(trap_lines, 1):
+        heading = HEADING.match(line)
+        if heading:
+            headings[int(heading.group(1))] = (n, heading.group(2))
 
     errors: list[str] = []
 
@@ -89,14 +106,15 @@ def main() -> int:
 
     for n, number, anchor in rows:
         if number not in headings:
-            errors.append(f"{DOC}:{n} row {number} has no matching `### {number}.` section")
+            errors.append(f"{DOC}:{n} row {number} has no `### {number}.` section in {TRAPS}")
             continue
         heading_line, heading_text = headings[number]
         want = anchor_for(f"{number}. {heading_text}")
         if anchor != want:
             errors.append(
                 f"{DOC}:{n} row {number} links to '#{anchor}' but its section at "
-                f"line {heading_line} anchors as '#{want}' — a dead link no other gate sees"
+                f"{TRAPS}:{heading_line} anchors as '#{want}' — a dead link no "
+                f"other gate sees"
             )
 
     numbers = [number for _, number, _ in rows]
@@ -110,8 +128,8 @@ def main() -> int:
     orphans = sorted(set(headings) - set(numbers))
     for number in orphans:
         errors.append(
-            f"{DOC}:{headings[number][0]} has a `### {number}.` section with no row "
-            f"in the trap table"
+            f"{TRAPS}:{headings[number][0]} has a `### {number}.` section with no "
+            f"row in {DOC}'s trap table"
         )
 
     # Sections must appear in the order they are numbered. Anchors resolving and
@@ -121,7 +139,7 @@ def main() -> int:
     ordered = [number for number, _ in sorted(headings.items(), key=lambda kv: kv[1][0])]
     if ordered != sorted(ordered):
         errors.append(
-            f"{DOC} trap sections appear in the order {ordered} — a reader "
+            f"{TRAPS} trap sections appear in the order {ordered} — a reader "
             f"scrolling past trap 2 should meet trap 3, not trap 12"
         )
 

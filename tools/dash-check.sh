@@ -35,9 +35,10 @@ while IFS= read -r -d '' f; do dashboards+=("$f"); done < <(
     LC_ALL=C sort -z
 )
 if [ "${#dashboards[@]}" -eq 0 ]; then
-  # Deliberately a pass, not a skip-with-a-wink: v1 ships no dashboards. But say
+  # Deliberately a pass, not a skip-with-a-wink. But say
   # so plainly, because until one exists every check below is untested at
-  # runtime and this line is the only one that has ever executed.
+  # so out loud, because an empty directory and a clean directory look
+  # identical in a green log.
   ok dash-check "no dashboards to check (nothing under $DASH_DIR/)"
   exit 0
 fi
