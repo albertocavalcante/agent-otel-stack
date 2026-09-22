@@ -33,12 +33,30 @@ mapfile -t shell < <(sh_files)
 #
 # So: no interpreter may be invoked from a shell script. If a shell tool needs
 # Python, it calls a .py file, which ruff can then actually read.
+# The first version of this check matched `<interpreter> -<anything>`, which
+# was wrong in both directions at once: it flagged `python3 --version`, and it
+# missed `PY=python3; $PY -c`. So it now looks for the interpreter NAME at all,
+# anywhere outside a comment, and allows only the two forms that do not run it:
+# `command -v` and `require_cmd`.
+#
+# Comments are stripped first, or every explanatory paragraph in this file
+# trips its own gate.
+# Written with a character class per name so this file does not match its own
+# pattern — the same trick LEAK_PATTERN uses in lib/common.sh, and for the same
+# reason. `pytho[n]3?` matches "python3"; the literal text does not.
+#
+# The name must sit in COMMAND position — start of line, or after whitespace,
+# `;`, `&`, `|`, `(` or `=` — and be followed by whitespace, `<` or end of
+# line. Without that last part the pattern also matched the bash array
+# `${python[@]}` in this very file, since the `3` is optional.
+INTERPRETERS='pytho[n]3?|rub[y]|per[l]|nod[e]|osascrip[t]'
+
 embedded=0
 for f in "${shell[@]}"; do
-  # Skip this gate's own pattern list, or it matches itself.
-  [ "$f" = "tools/lint.sh" ] && continue
-  if grep -nE '(^|[^[:alnum:]_])(python3?|ruby|perl|node|osascript)[[:space:]]+(-c|-e|-)' "$f"; then
-    echo "✗ lint: $f embeds another language — move it to its own file" >&2
+  if sed -e 's/[[:space:]]#.*$//' -e '/^[[:space:]]*#/d' "$f" |
+    grep -nE "(^|[[:space:];&|(=])($INTERPRETERS)([[:space:]<]|$)" |
+    grep -vE '(command -v|require_cmd)[[:space:]]+('"$INTERPRETERS"')'; then
+    echo "✗ lint: $f names an interpreter — move that work to its own file" >&2
     embedded=1
   fi
 done
@@ -51,12 +69,12 @@ elif ! shellcheck -S warning "${shell[@]}"; then
   exit 1
 fi
 
-mapfile -t python < <(py_files)
-if [ "${#python[@]}" -eq 0 ]; then
-  echo "✓ lint: no python files to check"
-elif ! ruff check --quiet "${python[@]}"; then
+mapfile -t py < <(py_files)
+if [ "${#py[@]}" -eq 0 ]; then
+  echo "✓ lint: no Python files to check"
+elif ! ruff check --quiet "${py[@]}"; then
   echo "✗ lint: ruff reported issues above" >&2
   exit 1
 fi
 
-echo "✓ lint: ${#shell[@]} shell + ${#python[@]} python file(s) clean"
+echo "✓ lint: ${#shell[@]} shell + ${#py[@]} Python file(s) clean"

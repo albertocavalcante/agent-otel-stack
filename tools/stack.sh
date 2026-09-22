@@ -70,10 +70,14 @@ cmd_up() {
 
   local failed=0
   wait_http "collector-agent" "http://127.0.0.1:13133/ready" 60 || failed=1
+  wait_http "collector-gateway" "http://127.0.0.1:13134/ready" 60 || failed=1
   wait_http "prometheus" "http://127.0.0.1:9090/-/ready" 60 || failed=1
   wait_http "loki" "http://127.0.0.1:3100/ready" 90 || failed=1
   wait_http "tempo" "http://127.0.0.1:3200/ready" 90 || failed=1
-  wait_http "grafana" "http://127.0.0.1:3000/api/health" 90 || failed=1
+  # Grafana runs a long database migration on FIRST boot and answers the port
+  # while still migrating — curl gets "empty reply", not a refusal. 90s was not
+  # enough on a cold start; this is a first-run cost, not a steady-state one.
+  wait_http "grafana" "http://127.0.0.1:3000/api/health" 240 || failed=1
 
   if [ "$failed" -ne 0 ]; then
     echo

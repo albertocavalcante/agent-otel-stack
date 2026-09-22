@@ -57,6 +57,11 @@ services:
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel/collector-gateway.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      # Health only, on a distinct host port. Without this `just up` cannot
+      # poll the gateway at all — and the gateway is the one component every
+      # backend depends on, so a dead gateway passed every other check.
+      - "127.0.0.1:13134:13133"
     depends_on:
       prometheus:
         condition: service_started

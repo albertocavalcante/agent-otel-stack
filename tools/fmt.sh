@@ -23,7 +23,7 @@ require_formatters() {
 }
 
 mapfile -t shell < <(sh_files)
-mapfile -t python < <(py_files)
+mapfile -t py < <(py_files)
 
 if [ "${1:-}" = "--check" ]; then
   require_formatters fmt-check
@@ -38,12 +38,12 @@ if [ "${1:-}" = "--check" ]; then
     fi
   fi
 
-  if [ "${#python[@]}" -gt 0 ] && ! ruff format --check --quiet --diff "${python[@]}"; then
+  if [ "${#py[@]}" -gt 0 ] && ! ruff format --check --quiet --diff "${py[@]}"; then
     echo "✗ fmt-check: run \`just fmt\` to fix the above" >&2
     exit 1
   fi
 
-  echo "✓ fmt-check: ${#shell[@]} shell + ${#python[@]} python file(s) correctly formatted"
+  echo "✓ fmt-check: ${#shell[@]} shell + ${#py[@]} Python file(s) correctly formatted"
   exit 0
 fi
 
@@ -52,8 +52,8 @@ require_formatters fmt
 if [ "${#shell[@]}" -gt 0 ]; then
   shfmt -i 2 -ci -w "${shell[@]}"
 fi
-if [ "${#python[@]}" -gt 0 ]; then
-  ruff format --quiet "${python[@]}"
+if [ "${#py[@]}" -gt 0 ]; then
+  ruff format --quiet "${py[@]}"
 fi
 
-echo "✓ fmt: formatted ${#shell[@]} shell + ${#python[@]} python file(s)"
+echo "✓ fmt: formatted ${#shell[@]} shell + ${#py[@]} Python file(s)"

@@ -90,10 +90,15 @@ asynchronously, after the distributor has already acknowledged the write. The
 config here sets `log_discarded_spans.enabled` so a discard is at least visible
 in the logs rather than purely in a counter.
 
-Loki is configured with `reject_old_samples_max_age: 168h` rather than the 7d
-default for a related reason: anything replayed from a backlog is *old by
-definition*, and the default window turns "we recovered the data" into "we
-recovered the data and Loki threw it away".
+Loki is configured with `reject_old_samples_max_age: 720h` for a related
+reason: anything replayed from a backlog is *old by definition*, and too narrow
+a window turns "we recovered the data" into "we recovered the data and Loki
+threw it away".
+
+Note the unit trap that caught this repo: Loki's default is `1w`, which is
+**168h**. An earlier revision set `168h` and described it as an override. It was
+the default, written longhand, changing nothing. If you widen this, check the
+number against the default rather than against your assumption of it.
 
 ## On this machine: podman cannot see `/Volumes`
 

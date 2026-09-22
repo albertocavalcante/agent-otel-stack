@@ -13,14 +13,14 @@
       "id": 1,
       "type": "stat",
       "title": "DEADMAN — is anything arriving?",
-      "description": "Fires when the agent has accepted no spans for 10 minutes. An empty graph looks identical to a healthy idle system; this does not. Pair it with a business-hours guard before alerting on it, or it will page you at 3am for nobody working.",
+      "description": "Fires when the agent has accepted no spans for 10 minutes. The `or on() vector(0)` is load-bearing: absent_over_time returns a series carrying the selector labels, vector(0) returns an unlabelled one, and plain `or` keeps BOTH during an outage — so the panel would show RECEIVING and NO DATA at once, exactly when it matters. An empty graph looks identical to a healthy idle system; this does not. Pair it with a business-hours guard before alerting on it, or it will page you at 3am for nobody working.",
       "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "agent-otel-prom" },
-          "expr": "absent_over_time(otelcol_receiver_accepted_spans{collector_role=\"agent\"}[10m]) or vector(0)",
+          "expr": "absent_over_time(otelcol_receiver_accepted_spans{collector_role=\"agent\"}[10m]) or on() vector(0)",
           "legendFormat": "no data"
         }
       ],
